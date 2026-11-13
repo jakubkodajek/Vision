@@ -63,4 +63,58 @@ describe("scripts/check_placeholders.sh", () => {
     }
     expect(run(d).status).toBe(0);
   });
+
+  it("exits non-zero when the root directory does not exist", () => {
+    const missing = join(tempRoot(), "does-not-exist");
+    expect(run(missing).status).not.toBe(0);
+  });
+
+  it("treats a root path starting with a dash as a path, not a grep option", () => {
+    const parent = tempRoot();
+    mkdirSync(join(parent, "-foo"));
+    writeFileSync(join(parent, "-foo", "AGENTS.md"), `${placeholder}\n`);
+    const r = spawnSync("bash", [script, "-foo"], { cwd: parent, encoding: "utf8" });
+    expect(r.status).toBe(1);
+  });
+
+  it("reports a placeholder in a nested README.md", () => {
+    const d = tempRoot();
+    mkdirSync(join(d, "sub"));
+    writeFileSync(join(d, "sub/README.md"), `${placeholder}\n`);
+    expect(run(d).status).toBe(1);
+  });
+
+  it("reports a placeholder in a nested features.json", () => {
+    const d = tempRoot();
+    mkdirSync(join(d, "sub"));
+    writeFileSync(join(d, "sub/features.json"), `${placeholder}\n`);
+    expect(run(d).status).toBe(1);
+  });
+
+  it("reports a placeholder in docs/README.md (only top-level README.md is excluded)", () => {
+    const d = tempRoot();
+    mkdirSync(join(d, "docs"));
+    writeFileSync(join(d, "docs/README.md"), `${placeholder}\n`);
+    expect(run(d).status).toBe(1);
+  });
+
+  it("still excludes the top-level README.md", () => {
+    const d = tempRoot();
+    writeFileSync(join(d, "README.md"), `${placeholder}\n`);
+    expect(run(d).status).toBe(0);
+  });
+
+  it("still excludes docs/PLAN.md", () => {
+    const d = tempRoot();
+    mkdirSync(join(d, "docs"));
+    writeFileSync(join(d, "docs/PLAN.md"), `${placeholder}\n`);
+    expect(run(d).status).toBe(0);
+  });
+
+  it("still excludes memory/features.json", () => {
+    const d = tempRoot();
+    mkdirSync(join(d, "memory"));
+    writeFileSync(join(d, "memory/features.json"), `${placeholder}\n`);
+    expect(run(d).status).toBe(0);
+  });
 });
