@@ -43,7 +43,7 @@ override the profile login (PLAN §3.5, §6.5, §6.6).
   output formats may change (R4).
 - Follow-ups: spike from Rust proving start, permission round-trip, cancel and resume on a
   subscription login, recorded as ADR-0005 (F-006); tool registry and environment allowlist
-  (F-011, F-012); written question to Anthropic and OpenAI before M2 (Q2).
+  (F-011, F-012); terms checklist per release (R2); no written confirmation from providers, owner accepts R2 (D12).
 
 ## Sources
 - docs/PLAN.md rev 3.1: §0 D1, D2, D4; §1 items 2-4; §3.1; §3.5; §6.2-6.6; §10 R2, R4, R10, R11.
