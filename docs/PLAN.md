@@ -160,7 +160,8 @@ Driving the user's own `claude` binary is the permitted path. Every runtime is t
 | Tauri 2 + Node.js sidecar | Sidecar must be packaged as a binary per target, for example with `pkg` ([Tauri: Node.js as a sidecar](https://v2.tauri.app/learn/sidecar-nodejs/)) | Faster to write; two runtimes to ship, update and debug. Fallback if Rust slows the project down. |
 | Electron + TypeScript | Main process runs Node.js, one renderer process per window, inherited from Chromium ([Electron process model](https://electronjs.org/docs/latest/tutorial/process-model)) | Most mature tooling; ships its own browser engine with every app, so larger download and memory `[no source: common convention]`. |
 
-**Decision proposal: Tauri 2 + Rust core + React/TypeScript UI.** It best matches
+**Decision: Tauri 2 + Rust core + React/TypeScript UI** (accepted by Jakub on
+2026-11-13, to be recorded as an ADR in M0). It best matches
 "speed matters" and "downloadable software", and nothing in the integration surface needs
 Node.js any more. Risks: webview differences between OSes (WebKitGTK on Linux, WebView2
 on Windows, WKWebView on macOS) `[no source: common convention]` and Rust's learning
@@ -431,6 +432,12 @@ Agents stay decoupled (spec §5) and every hand-off becomes an auditable event. 
 **Recommendation: A**, plus an app-level *Shared library* for agent templates and skills,
 which contain no account data. *[opinion]*
 
+**Sharing is the user's choice (decided 2026-11-13).** An app setting controls it:
+*shared library on* (default) lets every profile use shared agents and skills; *off* keeps
+each profile fully separate. Per item, the user can also publish a profile's agent or
+skill to the shared library or keep it private to that profile. Publishing strips
+profile-specific bindings such as MCP servers and repository links.
+
 ### 6.2 What a profile contains
 
 ```
@@ -573,22 +580,19 @@ criteria as acceptance items.
 
 ## 10. Open questions for Jakub
 
-Answered in revision 2: subscription sign-in via CLI, no API keys; Work/Personal profiles
-with separate GitHub and AI logins; Claude Code, Codex, maybe Antigravity; macOS, Windows
-and Linux; open source, downloadable, not hosted; language secondary to speed.
+Answered: subscription sign-in via CLI, no API keys; Work/Personal profiles with separate
+GitHub and AI logins; Claude Code, Codex, maybe Antigravity; macOS, Windows and Linux;
+open source, downloadable, not hosted; language secondary to speed; **Rust core accepted**;
+**agents and skills may be shared between profiles, controlled by a user setting** (§6.1).
 
 Still open:
 
 1. **License:** MIT or Apache-2.0 (Apache adds an explicit patent grant), or something else?
 2. **Profile placement:** OK with profiles above workspaces (§6.1, option A)?
-3. **Sharing:** may agent templates and skills be shared between Work and Personal
-   through the shared library, or must the profiles be fully separate?
-4. **Antigravity:** acceptable to support it in one profile only until per-profile login is
+3. **Antigravity:** acceptable to support it in one profile only until per-profile login is
    documented (§6.4)?
-5. **Rust core:** fine with a Rust core and TypeScript UI, knowing it is slower to write
-   than an all-TypeScript app (§3.2)?
-6. **Git hosts:** GitHub only, or also GitLab or self-hosted Gitea?
-7. **Work policy:** does your employer allow running these CLIs with work code and a work
+4. **Git hosts:** GitHub only, or also GitLab or self-hosted Gitea?
+5. **Work policy:** does your employer allow running these CLIs with work code and a work
    account inside a third-party open-source tool?
 
 ---
