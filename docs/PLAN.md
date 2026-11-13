@@ -59,9 +59,13 @@ pages, not legal advice.
    for all of them (§5.3).
 6. **Agents collaborate through a Vision MCP server** (`create_subtask`,
    `request_review`, `report_blocker`, ...) instead of sharing context (§5.4).
-7. **Roadmap:** Phase 0 for the app skeleton and profiles, then a single-agent vertical
+7. **A project knowledge layer** ("second brain"): agents propose decisions, conventions
+   and lessons, the user approves them, and they are stored as plain Markdown that child
+   projects inherit; a local full-text index makes them searchable for agents. Plus an
+   idea inbox, a usage overview across profiles, and workflow templates (§7).
+8. **Roadmap:** Phase 0 for the app skeleton and profiles, then a single-agent vertical
    slice with Claude Code early, because the CLI integration is the riskiest part.
-   Milestones M0 to M8 lead to the spec's acceptance scenario (§8).
+   Milestones M0 to M8 lead to the spec's acceptance scenario, and M9 adds the project knowledge layer (§7, §9).
 
 ---
 
@@ -131,7 +135,7 @@ flowchart LR
   and per tool (configurable).
 - Perceived speed is dominated by the model and the CLI, not by Vision `[no source:
   estimate]`. Vision's own speed budget is about startup, navigation and rendering streams;
-  targets are listed per milestone in §8.
+  targets are listed per milestone in §9.
 
 ---
 
@@ -165,7 +169,7 @@ Driving the user's own `claude` binary is the permitted path. Every runtime is t
 "speed matters" and "downloadable software", and nothing in the integration surface needs
 Node.js any more. Risks: webview differences between OSes (WebKitGTK on Linux, WebView2
 on Windows, WKWebView on macOS) `[no source: common convention]` and Rust's learning
-curve. Both are tested in the M0 spike (§8) before the decision becomes an ADR. *[opinion]*
+curve. Both are tested in the M0 spike (§9) before the decision becomes an ADR. *[opinion]*
 
 ### 3.3 Frontend
 
@@ -519,11 +523,97 @@ and are injected only into the environment of the run that needs them.
 
 ---
 
-## 7. Distribution (no hosting)
+## 7. Knowledge layer ("second brain" for projects)
+
+The aim is not general note-taking but a **knowledge layer per project** that agents read
+and write, that the user approves, and that follows the project tree's inheritance
+(§4.3). Everything stays local and in plain files. *[opinion: scope and design]*
+
+### 7.1 Project memory
+
+| Kind | Example | File |
+| --- | --- | --- |
+| Decision (ADR) | "Use dbt incremental models for Sklik" | `decisions/NNNN-<slug>.md` |
+| Convention | "SQL keywords upper case, CTEs over subqueries" | `conventions.md` |
+| Lesson learned | "Meta Ads API paginates by cursor, never by offset" | `lessons.md` |
+| Glossary | "ROAS = revenue / ad spend" | `glossary.md` |
+| Why-notes | "We split Semantic Layer out because ..." | `notes/<slug>.md` |
+
+- **Agents propose, the user approves.** A run calls
+  `vision.propose_memory(kind, text, evidence_refs)`. The proposal lands in a **memory
+  inbox** with the evidence (run, diff, test output). Approve, edit or reject; approved
+  entries are written to the files above. Nothing becomes "memory" silently, which keeps
+  wrong lessons from spreading to every later run. *[opinion]*
+- **Where the files live** is a per-project choice: inside the repository (for example
+  `docs/` and `memory/`, versioned with the code and readable by agents outside Vision)
+  or in Vision's local project folder (for projects without a repo, or private notes).
+- **Format:** Markdown with YAML frontmatter (kind, status, date, source run) and
+  `[[wiki-links]]` between notes, so the folder also opens as an Obsidian vault
+  `[no source: to verify Obsidian link and frontmatter compatibility]`.
+- **Inheritance:** a child project sees its ancestors' memory with provenance badges, like
+  every other setting. A parent's convention can be overridden locally.
+- **Hand-off into runs:** the resolver builds a short, ranked memory digest for each run
+  (conventions and decisions of the project path), injected into the agent's instructions;
+  the rest is reachable through search (§7.2). Keeping injected context short follows the
+  same reasoning as the repo's own guidance that long always-loaded instruction files
+  reduce adherence ([`research.md`](research.md) §1, Memory).
+
+### 7.2 Local search over project context
+
+- **Index:** SQLite FTS5 with BM25 ranking ([SQLite FTS5](https://www.sqlite.org/fts5.html))
+  over project memory, knowledge docs, task specs, artifacts and run summaries. Code is
+  not copied into the index; agents already search code with their CLI's own tools inside
+  the worktree. *[opinion]*
+- **Semantic search** with a local embedding model is a later option behind a setting,
+  once FTS5 is shown to be insufficient `[no source: to verify model size and speed on
+  laptops]`.
+- **Access for agents:** `vision.search(query, scope)` and `vision.get_doc(id)` on the
+  Vision MCP server, scoped to the run's project path and profile.
+- **Privacy, stated plainly:** the index never leaves the machine, but whatever an agent
+  reads from search results is sent to that agent's model provider as part of its
+  context, like any file it reads.
+
+### 7.3 Idea inbox
+
+- Global quick capture (keyboard shortcut, tray menu) saves a thought with an optional
+  project.
+- Triage view: assign project, then turn into a task with one click, optionally with a
+  workflow template (§7.5) and an agent.
+- Ideas are plain records in the profile's database and exportable as Markdown.
+
+### 7.4 Subscription usage overview
+
+- One panel across all profiles: per account, runs in progress, recent usage, rate-limit
+  hits and the time until the CLI says it will retry.
+- **Only what the CLIs report.** Claude Code's stream includes per-run usage, a
+  client-side cost estimate (`total_cost_usd`) and `api_retry` events with error
+  `rate_limit` ([headless](https://code.claude.com/docs/en/headless.md)). Whether Codex and
+  Antigravity expose remaining quota to a client is `[no source: to verify per CLI]`.
+  Vision never scrapes provider websites for quota.
+- Feeds the scheduler: an account that is rate-limited gets no new runs until it recovers
+  (§5.5).
+
+### 7.5 Workflow templates
+
+Stored, shareable DAG templates (shared library, §6.1), shipped with sensible defaults:
+
+| Template | Steps |
+| --- | --- |
+| Fix issue | Read issue → implement in worktree → reviewer → QA → PR |
+| Feature (test-first) | Architect plan → tests first → implement → parallel review → verify findings → PR, mirroring this repository's own `/feature` pipeline ([`agent-workflow.md`](agent-workflow.md)) |
+| Bug hunt | Debugger reproduces → fix → regression test → review |
+| Docs refresh | Documentation agent updates docs from recent merges → review |
+
+Each template declares its agents by role, so it works with the user's forks of the
+built-in agents.
+
+---
+
+## 8. Distribution (no hosting)
 
 - **Desktop app only**, built for macOS (Apple Silicon and Intel), Windows and Linux with
   Tauri's bundlers, published as GitHub Releases. *[opinion]*
-- **Open source.** License to be chosen (Q1 in §10). Product name and logo must not use
+- **Open source.** License to be chosen (Q1 in §11). Product name and logo must not use
   "Claude Code" or "Anthropic"; plain-text statements such as "runs Claude Code" are
   allowed ([legal and compliance](https://code.claude.com/docs/en/legal-and-compliance)).
 - **Prerequisites the user installs:** git, and any of `claude`, `codex`, `gh`, `agy`.
@@ -538,7 +628,7 @@ and are injected only into the environment of the run that needs them.
 
 ---
 
-## 8. Roadmap
+## 9. Roadmap
 
 The spec's five phases stay; Phase 0 is added, and the single-agent vertical slice moves
 early. Each milestone ends with `make check` green and a short demo recording
@@ -548,13 +638,14 @@ early. Each milestone ends with `make check` green and a short demo recording
 | --- | --- | --- | --- |
 | **M0 Skeleton + spike** | 0 | `bootstrap-project`; Tauri 2 app with Rust core and React UI; SQLite + migrations; `make` targets; CI building on macOS, Windows, Linux; spike: spawn `claude -p` stream-json from Rust and render it live; ADRs for shell, core language, storage, runtime strategy | CI produces installers for all three OSes; spike streams a real Claude Code run into the UI on Jakub's machine |
 | **M1 Profiles & accounts** | 0 | Profile CRUD, switcher, colors; per-profile config homes; built-in terminal (PTY) for sign-in; account status checks for Claude Code, Codex, `gh`; git identity | Two profiles signed in to two different Claude and GitHub accounts on one machine; status shows both correctly; test asserts a run's environment contains only its own profile's directories |
-| **M2 Projects** | 1 | Workspace, nested projects, rename, archive, move, reorder; virtualized sidebar; settings with inheritance and provenance; basic dashboard | 1 000-node tree; project switch under 100 ms p95 `[no source: estimate, target to validate]`; inheritance tests for all three modes |
+| **M2 Projects** | 1 | Workspace, nested projects, rename, archive, move, reorder; virtualized sidebar; settings with inheritance and provenance; basic dashboard; idea inbox (§7.3) | 1 000-node tree; project switch under 100 ms p95 `[no source: estimate, target to validate]`; inheritance tests for all three modes |
 | **M3 Git** | 1 | Link repo to a profile's GitHub account; clone; branches, commits, diff view; worktree service with per-worktree credential helper and identity | Push to a private repo as the Work account and to another as the Personal account from the same app |
 | **M4 Agent Studio** | 2 | 12 built-in templates; from scratch, duplicate, fork-on-edit; editor; tool and model selection; MCP and skill assignment; permissions; Markdown import/export | Editing a built-in forks it; export and re-import round-trips |
 | **M5 First real run** | 3 | Claude Code adapter; worktree per run; event log and live stream; policy engine with approval cards via `--permission-prompt-tool`; cancel and resume; usage display | One agent fixes a seeded bug in a test repo end to end on a subscription login, every tool call visible, one human approval |
-| **M6 Codex adapter** | 3 | `codex app-server` adapter with approvals and steering | The M5 scenario passes unchanged on Codex |
+| **M6 Codex adapter** | 3 | `codex app-server` adapter with approvals and steering; usage overview across profiles (§7.4) | The M5 scenario passes unchanged on Codex |
 | **M7 MCP management** | 2-3 | Add stdio and HTTP servers per profile; per-run MCP config with allowlists; health and tool discovery; keychain-backed env secrets | Agent without a binding cannot see a server; the same server works with different logins in two profiles |
-| **M8 Orchestration** | 4 | Vision MCP server; Engineering Manager; task DAG; parallel worktrees; review and QA steps; human approval; concurrency and rate-limit handling | Spec §16 acceptance scenario passes on the DataBrain sample project |
+| **M8 Orchestration** | 4 | Vision MCP server; Engineering Manager; task DAG; parallel worktrees; review and QA steps; human approval; concurrency and rate-limit handling; built-in workflow templates (§7.5) | Spec §16 acceptance scenario passes on the DataBrain sample project |
+| **M9 Project memory & search** | 5 (new) | Memory files and inbox with approve/edit/reject; `vision.propose_memory`; inherited memory digest per run; FTS5 index; `vision.search` / `vision.get_doc` (§7.1, §7.2) | An agent proposes a lesson, the user approves it, and the next run in a child project receives it and cites it |
 | Phase 5 | 5 | Antigravity / generic ACP adapter, workflow editor, container runs, knowledge, analytics | Prioritised after M8 |
 
 After acceptance, one entry per milestone goes into `memory/features.json`, with the exit
@@ -562,7 +653,7 @@ criteria as acceptance items.
 
 ---
 
-## 9. Risks
+## 10. Risks
 
 | # | Risk | Mitigation |
 | --- | --- | --- |
@@ -578,7 +669,7 @@ criteria as acceptance items.
 
 ---
 
-## 10. Open questions for Jakub
+## 11. Open questions for Jakub
 
 Answered: subscription sign-in via CLI, no API keys; Work/Personal profiles with separate
 GitHub and AI logins; Claude Code, Codex, maybe Antigravity; macOS, Windows and Linux;
@@ -597,7 +688,7 @@ Still open:
 
 ---
 
-## 11. Next steps after approval
+## 12. Next steps after approval
 
 1. Record the answers as ADRs and in `memory/decisions.md`.
 2. Run `bootstrap-project` with the chosen stack.
