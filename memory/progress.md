@@ -29,3 +29,9 @@ Template:
 - State: no application code yet; branch `claude/project-thread-qwfpka`, PR #1.
 - Next: Jakub answers the remaining questions in `docs/PLAN.md` §10, then M0 (skeleton + Claude Code streaming spike).
 - Blockers / open questions: see `docs/PLAN.md` §10.
+
+## 2026-11-13 - vision-plan (revision 3)
+- Done: `docs/PLAN.md` revision 3: owner decisions D1-D8, knowledge layer, generic per-profile tool registry, findings of an independent review applied (safe launch flags, no push credential for agents, crash recovery, launch compilation, adapter tests, Windows specifics, roadmap reorder with first run at M2 and 0.1 at M7).
+- State: no application code yet; branch `claude/project-thread-qwfpka`, PR #1.
+- Next: Jakub answers `docs/PLAN.md` §11, then M0.
+- Blockers / open questions: `docs/PLAN.md` §11.
