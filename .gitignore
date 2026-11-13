@@ -1,0 +1,29 @@
+# Agent scratch space (plans, findings, repro scripts, screenshots)
+.work/
+
+# Personal agent config
+CLAUDE.local.md
+.claude/settings.local.json
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Common build output (extend for your stack)
+node_modules/
+dist/
+build/
+coverage/
+__pycache__/
+*.pyc
+.venv/
+playwright-report/
+test-results/

@@ -1,0 +1,24 @@
+name: Feature request
+description: Propose a new feature or change
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Who has which problem?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Numbered, observable behaviours. Agents turn these into tests.
+      placeholder: |
+        1. Given ..., when ..., then ...
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: UX / technical notes

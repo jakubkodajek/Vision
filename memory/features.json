@@ -1,0 +1,14 @@
+{
+  "$comment": "Agents may only change the 'passes' field, and only after verification with make check. Humans add and edit items.",
+  "features": [
+    {
+      "id": "F-001",
+      "title": "TODO(bootstrap) first core feature",
+      "acceptance": [
+        "TODO(bootstrap) observable behaviour 1"
+      ],
+      "priority": 1,
+      "passes": false
+    }
+  ]
+}
