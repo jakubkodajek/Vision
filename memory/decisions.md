@@ -4,3 +4,12 @@ One line per decision. Significant or hard-to-reverse decisions get an ADR in `d
 Format: `- YYYY-MM-DD: <decision> - <reason> [ADR-NNNN]`
 
 - 2026-11-07: Use AGENTS.md as the canonical agent instruction file, imported by CLAUDE.md - one file works for Claude Code, Codex and Copilot [ADR-0001]
+- 2026-11-13: Vision core in Rust inside a Tauri 2 desktop app, UI in React/TypeScript - speed, single binary, no Node sidecar now that runtimes are CLI subprocesses (see docs/PLAN.md §3.2; ADR in M0)
+- 2026-11-13: AI access only via the user's own subscription login in the official CLIs; Vision stores no AI or GitHub tokens - provider terms and user requirement (docs/PLAN.md §3.5, §6)
+- 2026-11-13: Agents and skills can be shared between profiles via a shared library, controlled by a user setting - user's choice (docs/PLAN.md §6.1)
+- 2026-11-13: License MIT - owner decision (docs/PLAN.md §0 D7)
+- 2026-11-13: Profiles sit above workspaces; each profile isolates logins for every tool via per-tool config directories (CLAUDE_CONFIG_DIR, CODEX_HOME, GH_CONFIG_DIR, CLOUDSDK_CONFIG, ...) - owner decision (docs/PLAN.md §6)
+- 2026-11-13: Antigravity allowed in one profile only until per-profile login is documented - owner decision (docs/PLAN.md §6.3)
+- 2026-11-13: UI layout and feel similar to the Claude desktop app, with Vision's own branding; all §11 defaults accepted - owner decision (docs/PLAN.md §0 D9, D10)
+- 2026-11-13: Owner develops on macOS; live CLI tests on macOS, Windows via CI replay until a Windows machine is available (docs/PLAN.md D11)
+- 2026-11-13: No written confirmation requested from Anthropic/OpenAI; owner accepts terms risk R2 based on published terms (docs/PLAN.md D12)
