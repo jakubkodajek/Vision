@@ -1,6 +1,6 @@
 # Vision: implementation plan
 
-- **Status:** Proposed, revision 3, for review by the product owner (Jakub)
+- **Status:** Accepted by the product owner (Jakub), revision 3.1
 - **Date:** 2026-11-13
 - **Input:** product specification "Vision v0.2", the owner's decisions listed in §0, and an
   independent review of revision 2 (findings verified against the cited sources before
@@ -29,6 +29,8 @@ not legal advice.
 | D6 | **Agents and skills can be shared between profiles**, controlled by a user setting. | 2026-11-13 |
 | D7 | **License: MIT.** | 2026-11-13 |
 | D8 | **Antigravity allowed in one profile only** until per-profile login is documented. | 2026-11-13 |
+| D9 | **UI similar to the Claude desktop app** in layout and feel, with Vision's own branding (§2.4). | 2026-11-13 |
+| D10 | **All recommended defaults in §11 accepted** (questions 2-11, 13). Questions 1 (time budget) and 12 (plan tier) remain open and do not block M0. | 2026-11-13 |
 
 ### Changes from revision 2
 
@@ -155,6 +157,28 @@ start processes. Rules *[opinion]*:
 - Tauri capabilities scoped per window to the commands that window needs; no generic
   "run command" or "read file" IPC.
 - Terminal output only through the terminal widget.
+
+### 2.4 UI design direction
+
+The owner wants a look and feel **similar to the Claude desktop app**: calm, content-first,
+conversation-centred (D9). Vision takes the *interaction patterns*, not the brand: its own
+name, logo, colour palette and open-source fonts, and no Anthropic logos, icons or trademarks,
+which the terms do not allow in a product's own branding
+([legal and compliance](https://code.claude.com/docs/en/legal-and-compliance)). *[opinion on
+the specific layout below]*
+
+| Area | Pattern |
+| --- | --- |
+| **Left sidebar** | Profile switcher at the top (name + colour); primary navigation (Home, Projects, Agents, Tasks, Knowledge, Settings); the project tree with expand/collapse; recent runs underneath, like a conversation list. Collapsible to icons. |
+| **Main column** | A run or task reads like a conversation: agent messages as text, tool calls as collapsed cards (expand for input/output), approval cards inline with Allow / Deny, a composer at the bottom to start a task with agent, model and project pickers. Centred, readable line length. |
+| **Right panel** | Opens on demand for diffs, files, artifacts, the task graph and memory proposals, similar to a side artifact panel; resizable, closable. |
+| **Visual style** | Warm neutral surfaces, one accent colour per profile, generous spacing, rounded corners, subtle borders instead of heavy shadows, a readable sans-serif for UI and a monospace for code; light and dark themes following the OS (spec §11). |
+| **Interaction** | Keyboard-first: command palette (Ctrl/Cmd+K), shortcuts for new task, profile switch, sidebar toggle; streaming text without layout jumps; every state designed (loading, empty, error, success, disabled). |
+| **Accessibility** | WCAG 2.2 AA: keyboard operable, visible focus, 4.5:1 text contrast, labelled inputs ([`.claude/rules/frontend.md`](../.claude/rules/frontend.md), [WCAG 2.2](https://www.w3.org/TR/WCAG22/)). |
+
+Implementation: design tokens (colours, spacing, radii, typography) as CSS custom properties
+in one theme file; a small component library (Sidebar, TreeItem, MessageItem, ToolCallCard,
+ApprovalCard, Composer, Panel, CommandPalette) built first in M0 and reused everywhere.
 
 ---
 
@@ -896,7 +920,8 @@ depend on Q1.
 
 ## 11. Open questions for Jakub
 
-Each has a recommended default so that "ok" is a valid answer.
+Each has a recommended default. **Jakub accepted all defaults on 2026-11-13 (D10)**; only
+questions 1 and 12 are still open.
 
 1. **Time budget:** how many hours a week, and is there a deadline (semester, thesis, demo)?
    *No default; sets the time boxes.*

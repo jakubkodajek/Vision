@@ -1,13 +1,205 @@
 {
-  "$comment": "Agents may only change the 'passes' field, and only after verification with make check. Humans add and edit items.",
+  "$comment": "Agents may only change the 'passes' field, and only after verification with make check. Humans add and edit items. Items F-001..F-022 were added on 2026-11-13 at the owner's request from docs/PLAN.md section 9 (milestones M0-M2). One item per session; 'depends_on' lists items that must pass first; 'needs_device' means the item needs Jakub's machine with a signed-in CLI (not the cloud container).",
   "features": [
     {
       "id": "F-001",
-      "title": "TODO(bootstrap) first core feature",
+      "milestone": "M0",
+      "title": "Bootstrap the repository for Tauri 2 + Rust core + React/TypeScript UI",
       "acceptance": [
-        "TODO(bootstrap) observable behaviour 1"
+        "Every TODO(bootstrap) in AGENTS.md, memory/project-context.md, docs/architecture.md and the Makefile is replaced with the stack from docs/PLAN.md (grep for TODO(bootstrap) outside excluded dirs returns nothing)",
+        "A Tauri 2 app scaffold exists with a Rust core crate and a React + TypeScript + Vite UI",
+        "make setup, make lint (cargo fmt --check, cargo clippy -D warnings, tsc --noEmit, eslint) and make test (cargo test, vitest) run and pass",
+        "At least one Rust unit test and one UI unit test exist and pass",
+        "CI installs the Rust and Node toolchains and runs make check on ubuntu-latest",
+        "ADRs 0002 (Tauri 2 + Rust core), 0003 (SQLite per profile) and 0004 (drive official CLIs, no API keys) are written from docs/PLAN.md"
       ],
+      "depends_on": [],
+      "needs_device": false,
       "priority": 1,
+      "passes": false
+    },
+    {
+      "id": "F-002",
+      "milestone": "M0",
+      "title": "CI builds installers for macOS, Windows and Linux",
+      "acceptance": [
+        "A GitHub Actions matrix (macos-latest, windows-latest, ubuntu-latest) runs make check and tauri build",
+        "Unsigned installers (dmg, msi or nsis, AppImage and deb) are uploaded as workflow artifacts",
+        "The workflow runs on pull requests and on main"
+      ],
+      "depends_on": ["F-001"],
+      "needs_device": false,
+      "priority": 2,
+      "passes": false
+    },
+    {
+      "id": "F-003",
+      "milestone": "M0",
+      "title": "Core storage: app DB and per-profile SQLite with forward-only migrations",
+      "acceptance": [
+        "SQLite opened in WAL mode; app DB and one DB per profile under the local app data directory",
+        "Forward-only numbered migrations tracked in PRAGMA user_version",
+        "The database is copied before a migration runs",
+        "An older schema version opening a newer database refuses with a clear error (tested)",
+        "Tests use a temporary directory, no real user data"
+      ],
+      "depends_on": ["F-001"],
+      "needs_device": false,
+      "priority": 3,
+      "passes": false
+    },
+    {
+      "id": "F-004",
+      "milestone": "M0",
+      "title": "Typed IPC and event channel between Rust core and UI",
+      "acceptance": [
+        "TypeScript types for commands and events are generated from the Rust definitions and checked in CI (stale types fail make lint)",
+        "A sample command and a sample streamed event are covered by a Rust test and a UI test",
+        "Tauri capabilities expose only the commands the main window needs; no generic run-command or read-file IPC",
+        "A strict Content Security Policy without inline scripts is configured"
+      ],
+      "depends_on": ["F-001"],
+      "needs_device": false,
+      "priority": 4,
+      "passes": false
+    },
+    {
+      "id": "F-005",
+      "milestone": "M0",
+      "title": "UI shell and design system (layout similar to the Claude desktop app, own branding)",
+      "acceptance": [
+        "Design tokens (colour, spacing, radius, typography) as CSS custom properties with light and dark themes following the OS",
+        "Components: Sidebar (collapsible), TreeItem, MessageItem, ToolCallCard, ApprovalCard, Composer, side Panel, CommandPalette (Ctrl/Cmd+K)",
+        "App shell: left sidebar with profile switcher placeholder and navigation, centred main column, resizable right panel",
+        "Every component has loading, empty, error and disabled states where applicable",
+        "Keyboard operable with visible focus; axe or equivalent accessibility check passes with no serious violations; text contrast at least 4.5:1",
+        "No Anthropic logos, icons, fonts or trademarks are used",
+        "Screenshots of light and dark themes at desktop width are attached to the PR"
+      ],
+      "depends_on": ["F-001"],
+      "needs_device": false,
+      "priority": 5,
+      "passes": false
+    },
+    {
+      "id": "F-006",
+      "milestone": "M0",
+      "title": "Spike: drive claude -p stream-json from Rust with a subscription login",
+      "acceptance": [
+        "A Rust spike binary starts claude -p with --input-format and --output-format stream-json, a non-default CLAUDE_CONFIG_DIR and an allowlisted environment, and prints normalised events",
+        "The run uses a claude.ai subscription login (claude auth status reports authMethod claude.ai and the expected configDirectory)",
+        "A permission request arrives through --permission-prompt-tool, is held 5 minutes, then allowed once and denied once",
+        "Cancelling mid tool call leaves no surviving child process",
+        "The session is resumed by id and continues",
+        "--setting-sources user and --strict-mcp-config suppress a repository hook and a repository .mcp.json",
+        "Behaviour with an expired login and with a rate limit is recorded",
+        "How to keep -p runs non-bare is recorded",
+        "All of the above verified on Windows and on macOS or Linux; findings written as ADR 0005; raw streams saved as test fixtures"
+      ],
+      "depends_on": ["F-001"],
+      "needs_device": true,
+      "priority": 6,
+      "passes": false
+    },
+    {
+      "id": "F-010",
+      "milestone": "M1",
+      "title": "Profiles: create, switch, colour, per-profile database",
+      "acceptance": [
+        "Create, rename, recolour and delete profiles; switcher in the sidebar with a keyboard shortcut",
+        "Each profile has its own database and profile directory with user-only permissions",
+        "Switching profile changes all visible data; no data from another profile is shown (tested)"
+      ],
+      "depends_on": ["F-003", "F-005"],
+      "needs_device": false,
+      "priority": 7,
+      "passes": false
+    },
+    {
+      "id": "F-011",
+      "milestone": "M1",
+      "title": "Tool registry with Claude Code, gh and gcloud presets and per-profile config homes",
+      "acceptance": [
+        "Registry entries define binary, config variables, login command, status command and variables to keep out",
+        "Presets: Claude Code (CLAUDE_CONFIG_DIR), GitHub CLI (GH_CONFIG_DIR, --insecure-storage), Google Cloud CLI (CLOUDSDK_CONFIG); custom tools can be added",
+        "Sign-in opens the system terminal with the profile environment",
+        "Status check shows signed in, expired, not installed or unverified per tool and profile"
+      ],
+      "depends_on": ["F-010"],
+      "needs_device": false,
+      "priority": 8,
+      "passes": false
+    },
+    {
+      "id": "F-012",
+      "milestone": "M1",
+      "title": "Environment allowlist and account verification for runs",
+      "acceptance": [
+        "Run environments are built from an allowlist, not by deleting variables",
+        "With ANTHROPIC_API_KEY and GH_TOKEN exported in the parent shell, a run still uses the profile login (tested with a fake CLI)",
+        "A run whose claude auth status or gh auth status does not match the profile fails with a clear message"
+      ],
+      "depends_on": ["F-011"],
+      "needs_device": false,
+      "priority": 9,
+      "passes": false
+    },
+    {
+      "id": "F-013",
+      "milestone": "M1",
+      "title": "Two-profile isolation test on a real machine",
+      "acceptance": [
+        "Two profiles signed in to different Claude and GitHub accounts on one machine",
+        "Signing out of profile A leaves profile B signed in, for Claude Code and gh",
+        "gcloud preset passes the same test or is marked unverified in the registry"
+      ],
+      "depends_on": ["F-012"],
+      "needs_device": true,
+      "priority": 10,
+      "passes": false
+    },
+    {
+      "id": "F-020",
+      "milestone": "M2",
+      "title": "Claude Code adapter with launch compilation, event log and live stream",
+      "acceptance": [
+        "Adapter normalises the stream into Vision events using the recorded fixtures from F-006 (replay tests in CI)",
+        "Agent definition fields compile to CLI flags as in docs/PLAN.md section 5.3; unsupported fields produce warnings",
+        "Events are persisted before the UI shows them; the run view renders messages, tool-call cards and usage live",
+        "Model output containing <img onerror> and a javascript: link renders inert (tested)"
+      ],
+      "depends_on": ["F-004", "F-005", "F-006", "F-012"],
+      "needs_device": false,
+      "priority": 11,
+      "passes": false
+    },
+    {
+      "id": "F-021",
+      "milestone": "M2",
+      "title": "Worktree per run with setup command, approvals, cancel, resume and crash recovery",
+      "acceptance": [
+        "Each run gets a worktree on vision/<task-id>/<agent-slug> with the repository setup command and copied files",
+        "Permission requests show as approval cards; one allowed and one denied in a test",
+        "A pending approval survives 30 minutes",
+        "Killing the app mid-run leaves no orphan process; after restart the run is interrupted and Resume continues the same session"
+      ],
+      "depends_on": ["F-020"],
+      "needs_device": false,
+      "priority": 12,
+      "passes": false
+    },
+    {
+      "id": "F-022",
+      "milestone": "M2",
+      "title": "End-to-end: an agent fixes a seeded bug on a subscription login",
+      "acceptance": [
+        "On Windows and on macOS or Linux, one hard-coded agent fixes a seeded bug in a test repository end to end",
+        "Every tool call is visible in the UI, with one human approval",
+        "Recorded as a short screen capture attached to the PR"
+      ],
+      "depends_on": ["F-021", "F-013"],
+      "needs_device": true,
+      "priority": 13,
       "passes": false
     }
   ]

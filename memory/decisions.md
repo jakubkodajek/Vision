@@ -10,3 +10,4 @@ Format: `- YYYY-MM-DD: <decision> - <reason> [ADR-NNNN]`
 - 2026-11-13: License MIT - owner decision (docs/PLAN.md §0 D7)
 - 2026-11-13: Profiles sit above workspaces; each profile isolates logins for every tool via per-tool config directories (CLAUDE_CONFIG_DIR, CODEX_HOME, GH_CONFIG_DIR, CLOUDSDK_CONFIG, ...) - owner decision (docs/PLAN.md §6)
 - 2026-11-13: Antigravity allowed in one profile only until per-profile login is documented - owner decision (docs/PLAN.md §6.3)
+- 2026-11-13: UI layout and feel similar to the Claude desktop app, with Vision's own branding; all §11 defaults accepted - owner decision (docs/PLAN.md §0 D9, D10)
