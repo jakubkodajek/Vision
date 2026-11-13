@@ -17,3 +17,9 @@ Template:
 - State: no application code yet.
 - Next: run the `bootstrap-project` skill.
 - Blockers / open questions: none.
+
+## 2026-11-13 - vision-plan
+- Done: wrote `docs/PLAN.md` (architecture, stack comparison with sources, data model, account profiles and vault, roadmap M0-M8, risks, open questions). Planning only, no code.
+- State: no application code yet; `make check` unchanged; branch `claude/project-thread-qwfpka`.
+- Next: Jakub answers the open questions in `docs/PLAN.md` §10; then record ADRs 0002-0005 and run `bootstrap-project`.
+- Blockers / open questions: see `docs/PLAN.md` §10.
