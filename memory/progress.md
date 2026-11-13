@@ -35,3 +35,8 @@ Template:
 - State: no application code yet; branch `claude/project-thread-qwfpka`, PR #1.
 - Next: Jakub answers `docs/PLAN.md` §11, then M0.
 - Blockers / open questions: `docs/PLAN.md` §11.
+
+## 2026-11-13 - f-001-bootstrap
+- Done: Tauri 2 workspace (`crates/vision-core`, `src-tauri`), React/Vite UI, `app_info` command, strict CSP + single-permission capability, placeholder icons, Makefile targets, placeholder check script, CI toolchain, filled `AGENTS.md`/memory/architecture, decisions for ADR-0002..0004.
+- State: `make check` green locally; F-001 `passes` not set (awaits verifier); `generate_context!` needs no `dist/` in dev profile.
+- Next: verifier for F-001, then F-002 (installer matrix) / F-003 (SQLite).

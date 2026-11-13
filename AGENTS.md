@@ -5,12 +5,10 @@ Canonical instructions for every AI coding agent working in this repository
 `CLAUDE.md` imports this file; `.github/copilot-instructions.md` points here.
 Keep it short: every line is loaded into every session.
 
-<!-- TEMPLATE: replace every "TODO(bootstrap)" below, or run the `bootstrap-project` skill. -->
-
 ## Project
 
-- **What it is:** TODO(bootstrap) one-sentence description.
-- **Stack:** TODO(bootstrap) e.g. TypeScript + React + Vite / Python 3.12 + FastAPI.
+- **What it is:** Vision, an open-source desktop app (macOS, Windows, Linux) that orchestrates AI coding agents by driving the user's own official CLIs (Claude Code, Codex) per account profile; nothing hosted, no API keys.
+- **Stack:** Tauri 2 + Rust core (`crates/vision-core`, `src-tauri`), React 19 + TypeScript + Vite UI (`src/`), SQLite per profile; npm, Cargo workspace.
 - **Context:** read `memory/project-context.md` (goals, users, constraints) before non-trivial work.
 
 ## Commands
@@ -29,8 +27,9 @@ instead of claiming success.
 
 ## Repository layout
 
-- `src/` application code (TODO(bootstrap) adjust)
-- `tests/` automated tests
+- `src/` React + TypeScript UI; `src-tauri/` Tauri shell (commands, config, capabilities)
+- `crates/vision-core/` domain logic, no Tauri dependency
+- `tests/` UI and config tests (vitest); Rust tests in `crates/*/tests/` and in-crate `#[cfg(test)]`
 - `docs/` architecture, ADRs (`docs/adr/`), feature specs (`docs/specs/`), agent workflow
 - `memory/` durable project memory shared by humans and agents (see `memory/README.md`)
 - `.claude/` Claude Code agents, skills, hooks, rules (source of truth for all agent definitions)
@@ -58,7 +57,9 @@ instead of claiming success.
 
 ## Code conventions
 
-- TODO(bootstrap) language-specific style, e.g. "strict TypeScript, no `any`".
+- TypeScript strict, no `any`. Rust 2024: `cargo fmt`, clippy clean (`-D warnings`), no `unsafe`, no `unwrap()` outside tests.
+- The UI reaches the core only through Tauri commands/events. Never add generic run-command or file-read IPC; keep the CSP strict (PLAN §2.3).
+- Vision never stores AI or GitHub tokens (ADR-0004).
 - Prefer the standard library and well-established packages; justify new dependencies in the PR.
 - Public functions get type annotations and a docstring/JSDoc.
 - No secrets in code, logs, or commits. Configuration comes from environment variables
