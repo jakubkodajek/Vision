@@ -27,7 +27,9 @@
         "Unsigned installers (dmg, msi or nsis, AppImage and deb) are uploaded as workflow artifacts",
         "The workflow runs on pull requests and on main"
       ],
-      "depends_on": ["F-001"],
+      "depends_on": [
+        "F-001"
+      ],
       "needs_device": false,
       "priority": 2,
       "passes": false
@@ -43,7 +45,9 @@
         "An older schema version opening a newer database refuses with a clear error (tested)",
         "Tests use a temporary directory, no real user data"
       ],
-      "depends_on": ["F-001"],
+      "depends_on": [
+        "F-001"
+      ],
       "needs_device": false,
       "priority": 3,
       "passes": false
@@ -58,7 +62,9 @@
         "Tauri capabilities expose only the commands the main window needs; no generic run-command or read-file IPC",
         "A strict Content Security Policy without inline scripts is configured"
       ],
-      "depends_on": ["F-001"],
+      "depends_on": [
+        "F-001"
+      ],
       "needs_device": false,
       "priority": 4,
       "passes": false
@@ -76,7 +82,9 @@
         "No Anthropic logos, icons, fonts or trademarks are used",
         "Screenshots of light and dark themes at desktop width are attached to the PR"
       ],
-      "depends_on": ["F-001"],
+      "depends_on": [
+        "F-001"
+      ],
       "needs_device": false,
       "priority": 5,
       "passes": false
@@ -94,9 +102,11 @@
         "--setting-sources user and --strict-mcp-config suppress a repository hook and a repository .mcp.json",
         "Behaviour with an expired login and with a rate limit is recorded",
         "How to keep -p runs non-bare is recorded",
-        "All of the above verified on Windows and on macOS or Linux; findings written as ADR 0005; raw streams saved as test fixtures"
+        "All of the above verified on macOS (the owner's machine); the Windows half of the spike runs in CI against the recorded fixtures plus a process-tree and cancel test with a fake CLI, and a live Windows run is scheduled once a Windows machine is available; findings written as ADR 0005; raw streams saved as test fixtures"
       ],
-      "depends_on": ["F-001"],
+      "depends_on": [
+        "F-001"
+      ],
       "needs_device": true,
       "priority": 6,
       "passes": false
@@ -110,7 +120,10 @@
         "Each profile has its own database and profile directory with user-only permissions",
         "Switching profile changes all visible data; no data from another profile is shown (tested)"
       ],
-      "depends_on": ["F-003", "F-005"],
+      "depends_on": [
+        "F-003",
+        "F-005"
+      ],
       "needs_device": false,
       "priority": 7,
       "passes": false
@@ -125,7 +138,9 @@
         "Sign-in opens the system terminal with the profile environment",
         "Status check shows signed in, expired, not installed or unverified per tool and profile"
       ],
-      "depends_on": ["F-010"],
+      "depends_on": [
+        "F-010"
+      ],
       "needs_device": false,
       "priority": 8,
       "passes": false
@@ -139,7 +154,9 @@
         "With ANTHROPIC_API_KEY and GH_TOKEN exported in the parent shell, a run still uses the profile login (tested with a fake CLI)",
         "A run whose claude auth status or gh auth status does not match the profile fails with a clear message"
       ],
-      "depends_on": ["F-011"],
+      "depends_on": [
+        "F-011"
+      ],
       "needs_device": false,
       "priority": 9,
       "passes": false
@@ -153,7 +170,9 @@
         "Signing out of profile A leaves profile B signed in, for Claude Code and gh",
         "gcloud preset passes the same test or is marked unverified in the registry"
       ],
-      "depends_on": ["F-012"],
+      "depends_on": [
+        "F-012"
+      ],
       "needs_device": true,
       "priority": 10,
       "passes": false
@@ -168,7 +187,12 @@
         "Events are persisted before the UI shows them; the run view renders messages, tool-call cards and usage live",
         "Model output containing <img onerror> and a javascript: link renders inert (tested)"
       ],
-      "depends_on": ["F-004", "F-005", "F-006", "F-012"],
+      "depends_on": [
+        "F-004",
+        "F-005",
+        "F-006",
+        "F-012"
+      ],
       "needs_device": false,
       "priority": 11,
       "passes": false
@@ -183,7 +207,9 @@
         "A pending approval survives 30 minutes",
         "Killing the app mid-run leaves no orphan process; after restart the run is interrupted and Resume continues the same session"
       ],
-      "depends_on": ["F-020"],
+      "depends_on": [
+        "F-020"
+      ],
       "needs_device": false,
       "priority": 12,
       "passes": false
@@ -193,11 +219,14 @@
       "milestone": "M2",
       "title": "End-to-end: an agent fixes a seeded bug on a subscription login",
       "acceptance": [
-        "On Windows and on macOS or Linux, one hard-coded agent fixes a seeded bug in a test repository end to end",
+        "On macOS (live) and in Windows CI (replay), one hard-coded agent fixes a seeded bug in a test repository end to end",
         "Every tool call is visible in the UI, with one human approval",
         "Recorded as a short screen capture attached to the PR"
       ],
-      "depends_on": ["F-021", "F-013"],
+      "depends_on": [
+        "F-021",
+        "F-013"
+      ],
       "needs_device": true,
       "priority": 13,
       "passes": false

@@ -30,6 +30,8 @@ not legal advice.
 | D7 | **License: MIT.** | 2026-11-13 |
 | D8 | **Antigravity allowed in one profile only** until per-profile login is documented. | 2026-11-13 |
 | D9 | **UI similar to the Claude desktop app** in layout and feel, with Vision's own branding (§2.4). | 2026-11-13 |
+| D11 | **Owner develops on macOS.** Live CLI tests run on macOS; Windows is covered by CI (replay tier, process-tree tests) until a Windows machine is available. | 2026-11-13 |
+| D12 | **No written confirmation from providers.** The owner reviewed the providers' published terms and accepts risk R2 without emailing Anthropic or OpenAI (replaces the default for Q2). | 2026-11-13 |
 | D10 | **All recommended defaults in §11 accepted** (questions 2-11, 13). Questions 1 (time budget) and 12 (plan tier) remain open and do not block M0. | 2026-11-13 |
 
 ### Changes from revision 2
