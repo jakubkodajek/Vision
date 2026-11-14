@@ -87,7 +87,7 @@
       ],
       "needs_device": false,
       "priority": 5,
-      "passes": false
+      "passes": true
     },
     {
       "id": "F-006",

@@ -10,6 +10,8 @@ export default defineConfig({
     watch: { ignored: ["**/src-tauri/**", "**/crates/**", "**/target/**"] },
   },
   envPrefix: ["VITE_", "TAURI_ENV_"],
+  // Never inline assets as data: URLs; the production CSP allows fonts only from 'self'.
+  build: { assetsInlineLimit: 0 },
   test: {
     environment: "jsdom",
     include: ["tests/**/*.test.{ts,tsx}"],

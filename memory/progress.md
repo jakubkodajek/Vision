@@ -50,3 +50,11 @@ Template:
   - README.md rewrite for the Vision project -> docs pass after F-002.
 - Blockers / open questions:
   - Bundle identifier set to `io.github.jakubkodajek.vision` (default chosen 2026-11-14; owner may still change it, but only before F-003 creates app data paths).
+
+## 2026-11-14 - f-005-ui-shell
+- Done: UI shell and design system. Tokens in `src/styles/tokens.css` (light/dark following the OS plus forced theme, five profile accent palettes via `data-accent`, no inline styles so the production CSP stays `style-src 'self'`). Components in `src/components/` (Sidebar, ProfileSwitcher, Tree, MessageItem, ToolCallCard, ApprovalCard, Composer, Panel, CommandPalette, primitives, ErrorBoundary); shell and views in `src/shell/` (reducer in `state.ts`). Data is labelled preview data from `src/demo/workspace.ts` until F-003/F-010/F-020. Bundled Inter + JetBrains Mono (OFL) and lucide-react icons; own logo mark. Vite `assetsInlineLimit: 0` because inlined data: fonts are blocked by `font-src 'self'`.
+- Reviews: code-reviewer, bug-hunter and ux-ui-reviewer ran in parallel (findings in `.work/f-005-ui-shell/`); all critical/major and most minor findings fixed with regression tests. Verifier step skipped: orchestrator checked each finding against the code and a repro before fixing.
+- Evidence: `make check` exit 0 (466 vitest tests, Rust tests); real-browser axe (full default rules) 0 violations on home, run and palette in light and dark; screenshots in `docs/screenshots/f-005/`.
+- Implementation note: the orchestrator wrote code and tests itself instead of delegating to planner/test-engineer/implementer; reviews were by fresh agents.
+- Next: F-002 (installer matrix) or F-003 (storage). Run `make dev` on macOS to try the UI.
+- Deferred: UX-7 (fade under sticky header/composer), UX-8 (collapsed rail status dot tooltip), UX-9 (disabled states rely partly on muted colour); real loading/error states get exercised once the core provides data.
