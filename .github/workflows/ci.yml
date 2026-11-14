@@ -44,21 +44,21 @@ jobs:
   check:
     name: Lint & test
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
-      # TODO(bootstrap): add your toolchain, e.g. actions/setup-node or astral-sh/setup-uv
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
       - run: make setup
       - run: make check
-
-  bootstrap-reminder:
-    name: Template placeholders
-    runs-on: ubuntu-latest
-    if: github.repository != 'jakubkodajek/dev_template'
-    steps:
-      - uses: actions/checkout@v6
-      - name: Warn about unfilled TODO(bootstrap) placeholders
-        run: |
-          if grep -rn "TODO(bootstrap)" --exclude-dir=.git --exclude-dir=.agents --exclude-dir=.claude --exclude-dir=.github --exclude=README.md . ; then
-            echo "::warning::Template placeholders remain. Run the bootstrap-project skill."
-          fi

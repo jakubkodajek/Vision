@@ -1,23 +1,30 @@
-# Single entry point for humans, agents and CI. Replace the TODO commands with
-# real ones for your stack (the bootstrap-project skill does this).
-.PHONY: setup lint test e2e check dev agents
+# Single entry point for humans, agents and CI.
+.PHONY: setup lint test e2e check dev agents placeholders
 
-setup: ## Install dependencies
-	@echo "TODO(bootstrap): e.g. npm ci  |  uv sync"
+setup: ## Install dependencies (npm + cargo)
+	npm ci
+	cargo fetch --locked
 
-lint: ## Lint, format check and typecheck
-	@echo "TODO(bootstrap): e.g. npm run lint && npm run typecheck  |  ruff check . && mypy ."
+lint: ## Format check, clippy, typecheck, eslint
+	cargo fmt --all -- --check
+	cargo clippy --workspace --all-targets --locked -- -D warnings
+	npx tsc --noEmit
+	npx eslint .
 
-test: ## Unit and integration tests
-	@echo "TODO(bootstrap): e.g. npm test  |  pytest"
+test: ## Rust and UI unit tests
+	cargo test --workspace --locked
+	npx vitest run
 
-e2e: ## End-to-end / UI tests
-	@echo "TODO(bootstrap): e.g. npx playwright test"
+e2e: ## End-to-end tests (none yet)
+	@echo "No end-to-end suite yet: Tauri WebDriver tests arrive with F-020/F-022. Nothing to run."
 
-check: agents lint test ## Everything CI runs
+check: agents placeholders lint test ## Everything CI runs
 
-dev: ## Run the app locally
-	@echo "TODO(bootstrap): e.g. npm run dev  |  uvicorn app.main:app --reload"
+dev: ## Run the desktop app with hot reload
+	npx tauri dev
 
 agents: ## Verify generated agent files are in sync
 	@python3 scripts/sync_agents.py --check
+
+placeholders: ## Fail if bootstrap placeholders remain
+	@bash scripts/check_placeholders.sh

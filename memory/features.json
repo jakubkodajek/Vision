@@ -16,7 +16,7 @@
       "depends_on": [],
       "needs_device": false,
       "priority": 1,
-      "passes": false
+      "passes": true
     },
     {
       "id": "F-002",
