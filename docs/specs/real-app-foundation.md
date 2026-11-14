@@ -75,7 +75,16 @@ are the only user-influenced path segment that is never user-typed. Tool ids are
 
 `Profile { id, name, kind: work|personal|other, accent: iris|teal|amber|rose|green, created_at }`.
 
-- Name: trimmed, 1 to 40 chars, no control characters, unique case-insensitively.
+- Name: trimmed and NFC-normalised; 1 to 40 characters counted after normalisation; no
+  control characters and no format characters (category Cf: zero-width, text-direction
+  marks and overrides); at least one visible character. Unique by NFKC + `to_lowercase`
+  (full-width and composed/decomposed spellings collide; this is not full Unicode case
+  folding, e.g. `ß` and `ss` stay distinct). The delete confirmation compares NFC forms,
+  case-sensitively. Custom tool names and descriptions follow the same text rules.
+- Profile-scoped commands hold a per-profile gate for their whole duration; delete closes
+  it, waits for operations in flight, and later operations on the deleted id get
+  `not_found` without recreating any file. On start the core removes `profiles/<id>/`
+  directories that have no row (a crash during delete) and their secrets.
 - Create makes the directory tree with user-only permissions, then the row; a failure rolls
   back both.
 - Delete requires the exact profile name as confirmation, removes the row and the whole
@@ -83,6 +92,9 @@ are the only user-influenced path segment that is never user-typed. Tool ids are
   Claude Code keeps its login in the Keychain keyed to the config directory
   ([Claude Code authentication](https://code.claude.com/docs/en/authentication)), so the UI
   tells the user to sign out first if a tool is still signed in. The last profile can be deleted.
+  Its MCP secrets are found through an index in `app.db` (`secret_index`), so an unreadable
+  `profile.db` does not orphan them. If the credential store is unavailable the delete still
+  succeeds; the indexed secrets are deleted on the next start.
 - The active profile id is an app setting persisted in `app.db`.
 
 ### 2.4 Tool registry and sign-in (F-011, F-012)
@@ -129,12 +141,45 @@ Built-in presets (sources in `docs/PLAN.md` §6.3; commands verified 2026-11-14)
 - **Custom tools** (app scope, stored in `app.db`): the user supplies name, binary, one
   config variable, and argv arrays for login, status and logout. `status_parser` is
   `exit_code`. `isolation` is `unverified`.
+  - The binary may not be a shell or interpreter (compared case-insensitively, `.exe`
+    stripped): `sh bash zsh fish dash ksh csh tcsh env python* node deno bun ruby perl php
+    osascript powershell pwsh cmd wscript cscript sudo doas xargs nohup open xdg-open`.
+  - The config variable matches `^[A-Z][A-Z0-9_]{0,47}$` and ends in `_CONFIG_DIR`,
+    `_CONFIG_HOME`, `_HOME`, `_CONFIG`, `_CONFIG_FILE` or `_DIR`. It may not be a variable
+    of a built-in or another custom tool, an allowlisted base variable, `ZDOTDIR`, `HOME`,
+    or in the families `XDG_*`, `GIT_*`, `PYTHON*`, `NODE_*`, `NPM_*`, `LD_*`, `DYLD_*`,
+    `ANTHROPIC_*`, `CLAUDE_*`, `OPENAI_*`, `CODEX_*`, `GH_*`, `GITHUB_*`, `AWS_*`, `AZURE_*`,
+    `CLOUDSDK_*`, `GOOGLE_*`, `SSH_*` (`JAVA_HOME`-style names are fine; `KUBECONFIG` is
+    not accepted). The environment builder refuses a variable set twice instead of letting
+    the later entry win.
+  - A stored tool that no longer validates (rules tightened, or a collision) is listed with
+    `invalid: <reason>` and cannot be checked, signed in or out; its variable is not
+    exported until it is edited and saved again.
+  - **Confirmation (AC15).** Before any command of a custom tool runs (version, status, the
+    sign-in or sign-out terminal) the core asks for a native OK/Cancel dialog showing the
+    profile, the tool, the resolved program path and every argv one per line (truncated,
+    control and format characters shown as `\u{..}`). The approval is stored in `app.db`
+    as the SHA-256 of the exact executable definition (binary, config variable and kind,
+    version, status, login and logout argv); any change asks again, deleting the tool
+    forgets it. Cancel returns `not_approved` and nothing runs. Built-in tools never ask;
+    `tools_list` never asks or spawns. The dialog is opened by Rust only; the webview has no
+    dialog permission.
+- If a tool is deleted or edited while `tool_check` runs, the result is not cached.
+- Version labels: only a successful `--version` counts, stderr is used when stdout is
+  empty, and the label is the first version-looking token (`1.2.3`, `1.2`, optional
+  `-`/`+` suffix). Key-like tokens (`sk-…`, `ghp_…`, `github_pat_…`, `xox?-…`, `AKIA…`,
+  `AIza…`, a `Bearer` value, long mixed base64 runs) are redacted in every message shown or
+  stored.
+- Codex status: negative phrases ("not logged in", "logged out", ...) are checked first;
+  `signed_in` only for a line starting with "Logged in"; anything else is `unknown`.
 
 **Environment allowlist** (`docs/PLAN.md` §6.6). The environment for every status command,
 terminal and MCP probe is *built*, not filtered: `PATH` (resolved, see below), `HOME`,
 `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `LANG`, `LC_*`, `TERM`, proxy variables
 (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY` in both cases), `SSL_CERT_FILE`,
-`SSL_CERT_DIR`, the Windows equivalents (`USERPROFILE`, `APPDATA`, `LOCALAPPDATA`,
+`SSL_CERT_DIR`, the desktop session variables a terminal or browser needs (`DISPLAY`,
+`WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS`, `XAUTHORITY`), the
+Windows equivalents (`USERPROFILE`, `APPDATA`, `LOCALAPPDATA`,
 `SystemRoot`, `ComSpec`, `PATHEXT`, `TEMP`, `TMP`), plus the config variables of the
 selected tools. Nothing else passes, so `ANTHROPIC_API_KEY`, `GH_TOKEN`,
 `CLAUDE_CODE_OAUTH_TOKEN` and similar cannot override a profile login
@@ -145,19 +190,34 @@ pure function with table-driven tests.
 `[no source: common convention]`, so Homebrew and npm-installed CLIs would look "not
 installed". On Unix the core asks the user's login shell once at startup
 (`$SHELL -ilc 'printf "__VISION_PATH__%s__END__" "$PATH"'`, 5 s timeout, output parsed
-between the markers) and appends well-known directories that exist
+between the markers; if that prints no markers it retries with `-lc`, then `-c`; `csh`
+and `tcsh` are asked with `-c` only; output is read even when an rc file leaves a
+background process holding the pipe) and appends well-known directories that exist
 (`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, `~/.cargo/bin`, `~/.npm-global/bin`,
 `~/.claude/local`, `~/google-cloud-sdk/bin`). Failure falls back to the process `PATH` plus
-those directories. Binaries are resolved to absolute paths against this `PATH` before spawn.
+those directories. Empty and relative `PATH` entries are dropped. Binaries are resolved to
+absolute paths against this `PATH` before spawn.
+
+**Process runner.** stdout and stderr are drained concurrently into a shared, capped buffer
+(output beyond the cap is discarded and the result is marked `truncated`). After the child
+exits (or is killed with its process group on timeout) the runner waits at most 250 ms for
+the pipes to close, then returns what it has, so a background process that inherited the
+pipes cannot hang a command.
 
 **Terminal launch** (`docs/PLAN.md` §6.5: sign-in happens in the system terminal so codes
 never pass through Vision). The core writes a launch script into
-`<data root>/tmp/` (mode 0700, removed on next start) that exports the allowlisted profile
+`<data root>/tmp/` (mode 0700; `launch_*` files older than 24 h are removed on start, so a
+second start never deletes a script a terminal is still reading) that exports the allowlisted profile
 variables, prints which profile and tool it is for, runs the argv with every argument
 shell-quoted by a tested quoting function, and keeps the window open.
 macOS: `open -a Terminal <script>.command`; Linux: first available of
-`x-terminal-emulator`, `gnome-terminal`, `konsole`, `xterm`; Windows: a `.cmd` file via
-`cmd /c start`. The script contains directory paths only, never a secret.
+`x-terminal-emulator`, `gnome-terminal`, `konsole`, `xterm`; Windows: a `.cmd` file run as
+`%SystemRoot%\System32\cmd.exe /d /k ""<script>""` in a new console (`CREATE_NEW_CONSOLE`),
+without `start`; a script path containing `" % ^ & ! | < >` is refused with
+`terminal_unavailable`. The script contains directory paths only, never a secret.
+
+**Single instance.** `tauri-plugin-single-instance`: a second launch focuses the running
+window and exits, so two processes never share the data root.
 
 `profile_open_terminal` opens a shell with every tool's variables for that profile, so
 `claude`, `gh`, `gcloud` in that window use the profile's accounts.
@@ -186,6 +246,14 @@ McpServer {
   profile deletes its secrets. If no credential store is available the save fails with
   `ErrorCode::SecretStoreUnavailable` instead of writing plaintext. These are MCP server
   secrets supplied by the user, not AI or GitHub tokens (ADR-0004 unchanged).
+  A secret entry saved without a new value keeps the stored one, except when the
+  destination changed (transport kind, HTTP origin = scheme, host and port with default
+  ports, or the stdio command or arguments): then every such secret must be entered again
+  (`invalid_input`, nothing changes), so a stored secret never follows an edited address.
+- **Shared logins.** A stdio server's env may not set a config variable of a tool whose
+  login it shares (`invalid_input`). Deleting a custom tool removes its id from every
+  server's `tool_ids` in every profile, and `mcp_save` drops ids of deleted tools the
+  stored server still had; a new unknown id is still rejected.
 - **Test (health check).** stdio: spawn the command with the allowlisted profile
   environment plus the server's env, perform MCP `initialize`, `notifications/initialized`
   and `tools/list` over newline-delimited JSON-RPC, 20 s overall timeout, then terminate the
@@ -196,15 +264,38 @@ McpServer {
   covers both transports; otherwise a minimal client is written against the specification
   (`docs/PLAN.md` §3.6, R7). The choice and its reason are recorded in `memory/decisions.md`.
   Responses are size-capped (1 MiB) and tool descriptions are treated as untrusted text.
+  - Before a stdio server is spawned the core asks for the same native confirmation as for
+    custom tools (AC15), showing profile, server, resolved program, arguments, env variable
+    names (never values) and shared logins. The approval is per profile and server, keyed
+    by the SHA-256 of command, args, env keys and tool ids; deleting the server forgets it.
+    HTTP servers never ask. A command that is not found is reported without asking.
+  - Robustness: up to 100 non-JSON stdout lines (banners) are skipped; a server `ping` is
+    answered with `{}`, any other server request with error -32601 (stdio and SSE);
+    pagination stops when a cursor repeats and tools are de-duplicated by name; the last
+    4 KiB of stderr is kept and an early exit reports the exit code and the last non-empty
+    stderr line (cleaned, redacted, 300 chars); a spawn failure says when the command was
+    not found; an SSE stream that stays open without a response ends with a timeout
+    message; a 3xx answer names its `Location`.
+  - Only the health of the definition that was probed is written (`UPDATE ... WHERE id AND
+    revision`; every edit bumps `revision`). A server deleted during the probe gives
+    `not_found`; one edited during the probe is returned as it now is, `untested` (AC16).
 - **Claude Code config.** `mcp_render_claude_config(profile)` is a pure function producing
   the `{"mcpServers": {...}}` document Claude Code accepts (stdio entry `command/args/env`,
   http entry `type: "http", url, headers`: [Claude Code MCP](https://code.claude.com/docs/en/mcp.md)).
   It is what F-020 will write as the per-run `--mcp-config` file. Until runs exist,
   **Sync to Claude Code** applies it to the profile's user scope by running
-  `claude mcp remove --scope user <name>` then `claude mcp add-json --scope user <name> <json>`
-  with the profile environment, only for servers Vision manages (tracked by name in
-  `profile.db`). Because Claude Code stores env values in its own config, the UI states that
-  secret values are written into that profile's Claude Code configuration.
+  `claude mcp add-json --scope user <name> <json>` with the profile environment; a name
+  Vision already manages (tracked in `profile.db`) is first removed with
+  `claude mcp remove --scope user <name>`. Rules:
+  - A server with any secret env or header value is never synced (the value would be on a
+    command line other local processes can read); it is listed in
+    `SyncReport.skipped[{name, reason}]`, and removed from Claude Code if Vision synced it
+    before. No `claude mcp` argv ever contains a secret.
+  - Vision never removes a name it does not manage. If `add-json` reports that the name
+    already exists, the server goes to `failed` as a conflict and stays unmanaged.
+  - A remove counts as done only on exit 0 or when Claude Code says the name does not exist
+    (`No MCP server named …`); otherwise it goes to `failed` (with the redacted first line
+    of the CLI output) and the name stays tracked for the next sync.
 - **Authorize** (http servers needing OAuth): opens the system terminal with
   `claude mcp login <name>` under the profile environment
   ([CLI reference](https://code.claude.com/docs/en/cli-reference.md)); tokens stay in the CLI.
@@ -219,8 +310,12 @@ nothing twice (types come from Rust). Every command returns `Result<T, IpcError>
 ```
 IpcError { code: ErrorCode, message: string }   // message is safe to show; no paths to secrets
 ErrorCode = invalid_input | not_found | conflict | not_installed | timeout | io
-          | schema_too_new | secret_store_unavailable | terminal_unavailable | internal
+          | schema_too_new | secret_store_unavailable | terminal_unavailable
+          | not_approved | internal
 ```
+
+`not_approved`: the user cancelled the native confirmation of a user-defined command
+(custom tool or stdio MCP server); nothing ran.
 
 | Command | Arguments | Returns |
 | --- | --- | --- |
@@ -242,10 +337,11 @@ ErrorCode = invalid_input | not_found | conflict | not_installed | timeout | io
 | `mcp_save` | `{ profile_id, server: McpServerInput }` | `McpServerView` |
 | `mcp_delete` | `{ profile_id, server_id }` | `null` |
 | `mcp_test` | `{ profile_id, server_id }` | `McpServerView` |
-| `mcp_sync_claude` | `{ profile_id }` | `SyncReport { synced[], removed[], failed[{name,message}] }` |
+| `mcp_sync_claude` | `{ profile_id }` | `SyncReport { synced[], removed[], failed[{name,message}], skipped[{name,reason}] }` |
 | `mcp_authorize` | `{ profile_id, server_id }` | `null` (terminal opened) |
 
-The capability file lists exactly these commands. The CSP stays as it is.
+The capability file lists exactly these commands (no dialog or other plugin permission).
+The CSP stays as it is.
 
 ## 3. UI
 
@@ -337,6 +433,15 @@ Installers
 Whole
 - AC14 `make check` exits 0; no existing test is deleted, skipped or loosened without a
   note in the PR.
+
+Security and concurrency (review fixes)
+- AC15 Headless execution of user-defined commands requires a native confirmation: a
+  custom tool's commands and a stdio MCP server run only after the user approved that exact
+  definition in a native dialog; Cancel yields `not_approved` and nothing runs; a changed
+  definition asks again; built-in tools and `tools_list` never ask.
+- AC16 Concurrent delete/edit during a probe never resurrects or reverts data: a server or
+  profile deleted, or a server or tool edited, while `mcp_test` or `tool_check` runs stays
+  deleted or edited, and no stale result is stored.
 
 ## 6. Risks
 
