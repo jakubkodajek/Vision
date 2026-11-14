@@ -412,6 +412,16 @@ describe("GitHub workflows", () => {
       expect(build).toMatch(/--target "\$TARGET"/);
     });
 
+    it("runs the Rust tests on every native build target before bundling", () => {
+      const build = jobs(text()).build ?? "";
+      const step = build.indexOf("cargo test --workspace --locked");
+      expect(step).toBeGreaterThan(-1);
+      expect(step).toBeLessThan(build.indexOf("npx tauri build"));
+      expect(build).toMatch(
+        /if:\s*matrix\.name != 'macos-x86_64'\s*\n\s*run:\s*cargo test --workspace --locked/,
+      );
+    });
+
     it("runs make check", () => {
       expect(jobs(text()).check ?? "").toMatch(/run:\s*make check/);
     });
