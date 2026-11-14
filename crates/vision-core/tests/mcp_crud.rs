@@ -461,3 +461,428 @@ fn invalid_value_error_does_not_echo_the_value() {
     .unwrap_err();
     assert!(!e.message.contains(SECRET));
 }
+
+// ---- SEC-3: a stored secret never follows a changed destination -------------------------
+
+fn update(
+    core: &Core,
+    pid: &str,
+    id: &str,
+    mut server: McpServerInput,
+) -> Result<McpServerView, IpcError> {
+    server.id = Some(id.into());
+    save(core, pid, server)
+}
+
+fn auth(v: Option<&str>) -> Vec<KeyValueInput> {
+    vec![secret("Authorization", v)]
+}
+
+#[test]
+fn changing_the_http_host_requires_secrets_to_be_entered_again() {
+    let (_h, core, pid) = setup();
+    let v = save(
+        &core,
+        &pid,
+        http("r", "https://mcp.example.com/mcp", auth(Some(SECRET))),
+    )
+    .unwrap();
+    let e = update(
+        &core,
+        &pid,
+        &v.id,
+        http("r", "https://evil.example.net/mcp", auth(None)),
+    )
+    .unwrap_err();
+    assert!(
+        e.code == ErrorCode::InvalidInput && e.message.contains("again"),
+        "{e:?}"
+    );
+}
+
+#[test]
+fn a_rejected_destination_change_modifies_nothing() {
+    let (_h, core, pid) = setup();
+    let v = save(
+        &core,
+        &pid,
+        http("r", "https://mcp.example.com/mcp", auth(Some(SECRET))),
+    )
+    .unwrap();
+    let _ = update(
+        &core,
+        &pid,
+        &v.id,
+        http("r", "https://evil.example.net/mcp", auth(None)),
+    );
+    let listed = core.mcp_list(ProfileScopeArgs { profile_id: pid }).unwrap();
+    assert_eq!(
+        listed[0].transport,
+        McpTransportView::Http {
+            url: "https://mcp.example.com/mcp".into(),
+            headers: vec![vision_core::ipc::KeyValueView {
+                key: "Authorization".into(),
+                value: ValueView::Secret { has_value: true },
+            }],
+        }
+    );
+}
+
+#[test]
+fn changing_the_http_port_requires_secrets_to_be_entered_again() {
+    let (_h, core, pid) = setup();
+    let v = save(
+        &core,
+        &pid,
+        http("r", "https://mcp.example.com/mcp", auth(Some(SECRET))),
+    )
+    .unwrap();
+    assert_eq!(
+        update(
+            &core,
+            &pid,
+            &v.id,
+            http("r", "https://mcp.example.com:8443/mcp", auth(None))
+        )
+        .unwrap_err()
+        .code,
+        ErrorCode::InvalidInput
+    );
+}
+
+#[test]
+fn changing_the_http_scheme_requires_secrets_to_be_entered_again() {
+    let (_h, core, pid) = setup();
+    let v = save(
+        &core,
+        &pid,
+        http("r", "https://localhost/mcp", auth(Some(SECRET))),
+    )
+    .unwrap();
+    assert_eq!(
+        update(
+            &core,
+            &pid,
+            &v.id,
+            http("r", "http://localhost/mcp", auth(None))
+        )
+        .unwrap_err()
+        .code,
+        ErrorCode::InvalidInput
+    );
+}
+
+#[test]
+fn changing_only_the_http_path_keeps_the_stored_secret() {
+    let (_h, core, pid) = setup();
+    let v = save(
+        &core,
+        &pid,
+        http("r", "https://mcp.example.com/mcp", auth(Some(SECRET))),
+    )
+    .unwrap();
+    assert!(
+        update(
+            &core,
+            &pid,
+            &v.id,
+            http("r", "https://mcp.example.com/v2/mcp", auth(None))
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn spelling_the_default_port_keeps_the_stored_secret() {
+    let (_h, core, pid) = setup();
+    let v = save(
+        &core,
+        &pid,
+        http("r", "https://mcp.example.com/mcp", auth(Some(SECRET))),
+    )
+    .unwrap();
+    assert!(
+        update(
+            &core,
+            &pid,
+            &v.id,
+            http("r", "https://mcp.example.com:443/mcp", auth(None))
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn a_destination_change_with_new_secret_values_is_allowed() {
+    let (_h, core, pid) = setup();
+    let v = save(
+        &core,
+        &pid,
+        http("r", "https://mcp.example.com/mcp", auth(Some(SECRET))),
+    )
+    .unwrap();
+    assert!(
+        update(
+            &core,
+            &pid,
+            &v.id,
+            http("r", "https://other.example.com/mcp", auth(Some("new")))
+        )
+        .is_ok()
+    );
+}
+
+fn stdio_with(command: &str, args: Vec<String>, env: Vec<KeyValueInput>) -> McpServerInput {
+    McpServerInput {
+        id: None,
+        name: "s".into(),
+        transport: McpTransportInput::Stdio {
+            command: command.into(),
+            args,
+            env,
+        },
+        tool_ids: vec![],
+        enabled: true,
+    }
+}
+
+#[test]
+fn changing_the_stdio_command_requires_secrets_to_be_entered_again() {
+    let (_h, core, pid) = setup();
+    let v = save(
+        &core,
+        &pid,
+        stdio_with("npx", vec![], vec![secret("API_KEY", Some(SECRET))]),
+    )
+    .unwrap();
+    assert_eq!(
+        update(
+            &core,
+            &pid,
+            &v.id,
+            stdio_with("uvx", vec![], vec![secret("API_KEY", None)])
+        )
+        .unwrap_err()
+        .code,
+        ErrorCode::InvalidInput
+    );
+}
+
+#[test]
+fn changing_the_stdio_arguments_requires_secrets_to_be_entered_again() {
+    let (_h, core, pid) = setup();
+    let v = save(
+        &core,
+        &pid,
+        stdio_with(
+            "npx",
+            vec!["a".into()],
+            vec![secret("API_KEY", Some(SECRET))],
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        update(
+            &core,
+            &pid,
+            &v.id,
+            stdio_with("npx", vec!["b".into()], vec![secret("API_KEY", None)])
+        )
+        .unwrap_err()
+        .code,
+        ErrorCode::InvalidInput
+    );
+}
+
+#[test]
+fn changing_the_transport_kind_requires_secrets_to_be_entered_again() {
+    let (_h, core, pid) = setup();
+    let v = save(
+        &core,
+        &pid,
+        stdio_with("npx", vec![], vec![secret("Authorization", Some(SECRET))]),
+    )
+    .unwrap();
+    assert_eq!(
+        update(
+            &core,
+            &pid,
+            &v.id,
+            http("s", "https://mcp.example.com/mcp", auth(None))
+        )
+        .unwrap_err()
+        .code,
+        ErrorCode::InvalidInput
+    );
+}
+
+#[test]
+fn editing_only_plain_values_keeps_the_stored_secret() {
+    let (_h, core, pid) = setup();
+    let v = save(
+        &core,
+        &pid,
+        stdio_with("npx", vec![], vec![secret("API_KEY", Some(SECRET))]),
+    )
+    .unwrap();
+    assert!(
+        update(
+            &core,
+            &pid,
+            &v.id,
+            stdio_with(
+                "npx",
+                vec![],
+                vec![secret("API_KEY", None), plain("MODE", "fast")]
+            )
+        )
+        .is_ok()
+    );
+}
+
+// ---- BUG-9 / SEC-9: deleting a custom tool cleans up after it ---------------------------
+
+fn custom_tool(core: &Core) {
+    core.custom_tool_save(vision_core::ipc::CustomToolSaveArgs {
+        tool: vision_core::ipc::CustomToolInput {
+            id: "kubectl".into(),
+            name: "kubectl".into(),
+            description: None,
+            binary: "kubectl".into(),
+            install_url: None,
+            config_var: "KUBECTL_CONFIG".into(),
+            config_kind: vision_core::ipc::ConfigEnvKind::File,
+            login: vec!["login".into()],
+            status: None,
+            logout: None,
+        },
+    })
+    .unwrap();
+}
+
+fn delete_tool(core: &Core) {
+    core.custom_tool_delete(vision_core::ipc::ToolIdArgs {
+        tool_id: "kubectl".into(),
+    })
+    .unwrap();
+}
+
+fn sharing(name: &str) -> McpServerInput {
+    McpServerInput {
+        tool_ids: vec!["kubectl".into(), "gcloud".into()],
+        ..stdio(name, vec![])
+    }
+}
+
+#[test]
+fn deleting_a_custom_tool_removes_it_from_every_servers_shared_logins() {
+    let (_h, core, pid) = setup();
+    custom_tool(&core);
+    save(&core, &pid, sharing("s")).unwrap();
+    delete_tool(&core);
+    let listed = core.mcp_list(ProfileScopeArgs { profile_id: pid }).unwrap();
+    assert_eq!(listed[0].tool_ids, vec!["gcloud".to_owned()]);
+}
+
+#[test]
+fn deleting_a_custom_tool_cleans_servers_in_every_profile() {
+    let (_h, core, pid) = setup();
+    let other = create_profile(&core, "Personal").id;
+    custom_tool(&core);
+    save(&core, &pid, sharing("s")).unwrap();
+    save(&core, &other, sharing("s")).unwrap();
+    delete_tool(&core);
+    let listed = core
+        .mcp_list(ProfileScopeArgs { profile_id: other })
+        .unwrap();
+    assert_eq!(listed[0].tool_ids, vec!["gcloud".to_owned()]);
+}
+
+#[test]
+fn saving_a_server_drops_a_deleted_tool_it_already_had() {
+    let (_h, core, pid) = setup();
+    custom_tool(&core);
+    let v = save(&core, &pid, sharing("s")).unwrap();
+    // Simulate an edit form opened before the delete: it still sends the old id.
+    let db = core.data_root().profile_db(&pid).unwrap();
+    delete_tool(&core);
+    let conn = rusqlite::Connection::open(db).unwrap();
+    conn.execute(
+        "UPDATE mcp_servers SET tool_ids_json = '[\"kubectl\",\"gcloud\"]'",
+        [],
+    )
+    .unwrap();
+    let saved = update(&core, &pid, &v.id, sharing("s")).unwrap();
+    assert_eq!(saved.tool_ids, vec!["gcloud".to_owned()]);
+}
+
+#[test]
+fn a_new_unknown_tool_id_is_still_rejected_on_update() {
+    let (_h, core, pid) = setup();
+    let v = save(&core, &pid, stdio("s", vec![])).unwrap();
+    assert_eq!(
+        update(
+            &core,
+            &pid,
+            &v.id,
+            McpServerInput {
+                tool_ids: vec!["nope".into()],
+                ..stdio("s", vec![])
+            }
+        )
+        .unwrap_err()
+        .code,
+        ErrorCode::InvalidInput
+    );
+}
+
+#[test]
+fn deleting_a_custom_tool_removes_its_login_files_in_every_profile() {
+    let (_h, core, pid) = setup();
+    let other = create_profile(&core, "Personal").id;
+    custom_tool(&core);
+    let dirs: Vec<std::path::PathBuf> = [&pid, &other]
+        .iter()
+        .map(|p| core.data_root().tool_dir(p, "kubectl").unwrap())
+        .collect();
+    for d in &dirs {
+        std::fs::create_dir_all(d).unwrap();
+        std::fs::write(d.join("config"), "token: x").unwrap();
+    }
+    delete_tool(&core);
+    assert_eq!(
+        dirs.iter().map(|d| d.exists()).collect::<Vec<_>>(),
+        vec![false, false]
+    );
+}
+
+// ---- BUG-11: every stored secret is indexed in app.db ----------------------------------
+
+#[test]
+fn a_saved_secret_is_indexed_under_its_profile() {
+    let (h, core, pid) = setup();
+    save(
+        &core,
+        &pid,
+        stdio("s", vec![secret("API_KEY", Some(SECRET))]),
+    )
+    .unwrap();
+    let conn = rusqlite::Connection::open(h.data_root().join("app.db")).unwrap();
+    let rows: Vec<(String, String)> = conn
+        .prepare("SELECT account, profile_id FROM secret_index")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(
+        rows.iter()
+            .map(|(a, p)| (a.clone(), p.clone()))
+            .collect::<Vec<_>>(),
+        h.secrets
+            .accounts()
+            .into_iter()
+            .map(|a| (a, pid.clone()))
+            .collect::<Vec<_>>()
+    );
+}

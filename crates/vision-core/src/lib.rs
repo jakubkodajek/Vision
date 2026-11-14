@@ -5,17 +5,21 @@
 //! [`secrets::SecretStore`] and [`mcp::McpProbe`]. [`Core`] is the facade the desktop shell
 //! calls: one method per IPC command in `docs/specs/real-app-foundation.md` §2.6.
 
+pub mod approvals;
 pub mod core;
 pub mod db;
 pub mod env;
+pub mod gate;
 pub mod ids;
 pub mod ipc;
 pub mod mcp;
 pub mod paths;
 pub mod process;
 pub mod profiles;
+pub mod redact;
 pub mod secrets;
 pub mod terminal;
+pub mod text;
 pub mod time;
 pub mod tools;
 

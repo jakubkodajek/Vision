@@ -32,6 +32,7 @@ fn out(stdout: &str, exit: i32) -> CommandOutput {
         },
         stderr: vec![],
         timed_out: false,
+        truncated: false,
     }
 }
 
@@ -41,6 +42,7 @@ fn stderr_out(stderr: &str, exit: i32) -> CommandOutput {
         stdout: vec![],
         stderr: fixture(stderr),
         timed_out: false,
+        truncated: false,
     }
 }
 
@@ -389,7 +391,7 @@ fn tool_check_runs_the_fake_cli_and_caches_the_result() {
         .unwrap();
     let cached = listed.iter().find(|t| t.spec.id == "claude").unwrap();
     assert_eq!(checked.status, Some(signed_in("ada@example.com")));
-    assert_eq!(checked.version.as_deref(), Some("2.1.0 (Claude Code)"));
+    assert_eq!(checked.version.as_deref(), Some("2.1.0"));
     assert_eq!(cached.status, checked.status);
 }
 
@@ -507,4 +509,164 @@ fn codex_existing_config_is_never_rewritten() {
     std::fs::write(dir.join("config.toml"), "model = \"mine\"\n").unwrap();
     check(&core, &p.id, "codex");
     assert_eq!(common::read(&dir.join("config.toml")), "model = \"mine\"\n");
+}
+
+// ---- suspected (d): codex wording ------------------------------------------------------
+
+fn text(stdout: &str, exit: i32) -> CommandOutput {
+    CommandOutput {
+        exit_code: Some(exit),
+        stdout: stdout.as_bytes().to_vec(),
+        ..CommandOutput::default()
+    }
+}
+
+#[test]
+fn codex_no_longer_logged_in_is_signed_out() {
+    assert_eq!(
+        parse(
+            StatusParser::Codex,
+            &text("You are no longer logged in. Run codex login.\n", 0)
+        ),
+        ToolStatus::SignedOut
+    );
+}
+
+#[test]
+fn codex_logged_out_is_signed_out() {
+    assert_eq!(
+        parse(StatusParser::Codex, &text("Logged out\n", 0)),
+        ToolStatus::SignedOut
+    );
+}
+
+#[test]
+fn codex_logged_in_mentioned_mid_line_is_unknown() {
+    assert!(is_unknown(&parse(
+        StatusParser::Codex,
+        &text("Error: could not confirm you are logged in\n", 0)
+    )));
+}
+
+// ---- suspected (c): version labels -----------------------------------------------------
+
+#[test]
+fn version_is_the_version_looking_token() {
+    assert_eq!(
+        vision_core::tools::parse_version(&text("codex-cli 0.46.0\n", 0)).as_deref(),
+        Some("0.46.0")
+    );
+}
+
+#[test]
+fn version_keeps_a_pre_release_suffix() {
+    assert_eq!(
+        vision_core::tools::parse_version(&text("tool v1.2.3-beta.1\n", 0)).as_deref(),
+        Some("1.2.3-beta.1")
+    );
+}
+
+#[test]
+fn version_of_a_failed_command_is_none() {
+    assert_eq!(
+        vision_core::tools::parse_version(&text("error 1.2.3 not found\n", 2)),
+        None
+    );
+}
+
+#[test]
+fn version_falls_back_to_stderr_when_stdout_is_empty() {
+    let o = CommandOutput {
+        exit_code: Some(0),
+        stderr: b"java version 21.0.2\n".to_vec(),
+        ..CommandOutput::default()
+    };
+    assert_eq!(
+        vision_core::tools::parse_version(&o).as_deref(),
+        Some("21.0.2")
+    );
+}
+
+#[test]
+fn output_without_a_version_number_gives_no_version() {
+    assert_eq!(
+        vision_core::tools::parse_version(&text("Usage: tool [options]\n", 0)),
+        None
+    );
+}
+
+// ---- SEC-8: key-like tokens never reach the UI -------------------------------------------
+
+#[test]
+fn an_unknown_status_message_redacts_an_api_key() {
+    let s = parse(
+        StatusParser::Claude,
+        &text("Invalid API key: sk-ant-api03-AbCdEf123456\n", 0),
+    );
+    assert!(
+        matches!(&s, ToolStatus::Unknown { message } if message.contains("sk-[redacted]") && !message.contains("AbCdEf123456")),
+        "{s:?}"
+    );
+}
+
+#[test]
+fn an_unknown_status_message_redacts_a_github_token() {
+    let s = parse(
+        StatusParser::Gh,
+        &text("bad credentials for ghp_0123456789abcdefABCDEF\n", 0),
+    );
+    assert!(
+        matches!(&s, ToolStatus::Unknown { message } if !message.contains("0123456789abcdef")),
+        "{s:?}"
+    );
+}
+
+// ---- tool_check never caches a result for an edited tool ---------------------------------
+
+#[test]
+fn a_check_finishing_after_the_tool_was_edited_caches_nothing() {
+    use vision_core::ipc::{ConfigEnvKind, CustomToolInput, CustomToolSaveArgs};
+    let h = Harness::new();
+    let marker = h.path("args.txt");
+    h.install_fake(
+        "mytool",
+        json!({"log_args": marker.to_str().unwrap(), "default": {"exit": 0, "sleep_ms": 1000}}),
+    );
+    let core = h.core();
+    let p = create_profile(&core, "Work");
+    let tool = CustomToolInput {
+        id: "mytool".into(),
+        name: "mytool".into(),
+        description: None,
+        binary: "mytool".into(),
+        install_url: None,
+        config_var: "MYTOOL_CONFIG_DIR".into(),
+        config_kind: ConfigEnvKind::Dir,
+        login: vec!["login".into()],
+        status: Some(vec!["status".into()]),
+        logout: None,
+    };
+    core.custom_tool_save(CustomToolSaveArgs { tool: tool.clone() })
+        .unwrap();
+    let result = std::thread::scope(|scope| {
+        let checking = scope.spawn(|| {
+            core.tool_check(ToolArgs {
+                profile_id: p.id.clone(),
+                tool_id: "mytool".into(),
+            })
+        });
+        let started = std::time::Instant::now();
+        while !marker.exists() && started.elapsed() < std::time::Duration::from_secs(10) {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        core.custom_tool_save(CustomToolSaveArgs {
+            tool: CustomToolInput {
+                status: Some(vec!["whoami".into()]),
+                ..tool
+            },
+        })
+        .unwrap();
+        checking.join().unwrap()
+    });
+    assert_eq!(result.unwrap().status, None);
 }

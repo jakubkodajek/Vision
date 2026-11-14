@@ -39,6 +39,9 @@ pub enum ErrorCode {
     SecretStoreUnavailable,
     /// No system terminal could be opened.
     TerminalUnavailable,
+    /// The user did not approve running a user-defined command (custom tool or stdio MCP
+    /// server) in the native confirmation dialog; nothing was run.
+    NotApproved,
     /// An unexpected internal error.
     Internal,
 }
@@ -223,7 +226,9 @@ pub struct Profile {
 /// Arguments of `profile_create`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
 pub struct ProfileCreateArgs {
-    /// Name: trimmed, 1 to 40 characters, no control characters.
+    /// Name: trimmed and NFC-normalised; 1 to 40 characters after normalisation; no
+    /// control, zero-width or text-direction characters; at least one visible character.
+    /// Unique ignoring case and Unicode compatibility forms (NFKC + lower-case).
     pub name: String,
     /// Kind.
     pub kind: ProfileKind,
@@ -252,7 +257,8 @@ pub struct ProfileUpdateArgs {
 pub struct ProfileDeleteArgs {
     /// Profile id.
     pub id: String,
-    /// Must equal the profile's name exactly.
+    /// Must equal the profile's name exactly (both compared in NFC form, so a name typed on
+    /// any keyboard matches; case matters).
     pub confirm_name: String,
 }
 
@@ -355,6 +361,11 @@ pub struct ToolSpecView {
     pub isolation: Isolation,
     /// `true` for presets, `false` for custom tools.
     pub builtin: bool,
+    /// Set only for a stored custom tool that no longer passes validation (for example its
+    /// config variable is now reserved): the reason, to show instead of the isolation note.
+    /// Such a tool is listed but cannot be checked, signed in or out, and its variable is not
+    /// exported, until it is edited and saved again. Always `null` for valid tools.
+    pub invalid: Option<String>,
 }
 
 /// Sign-in status of a tool in a profile.
@@ -417,19 +428,25 @@ pub struct ToolIdArgs {
 pub struct CustomToolInput {
     /// Tool id, `^[a-z][a-z0-9_-]{0,31}$`, not a preset id. Saving an existing id updates it.
     pub id: String,
-    /// Display name, 1 to 40 characters.
+    /// Display name, 1 to 40 characters (same text rules as profile names).
     pub name: String,
     /// Optional description.
     #[serde(default)]
     #[ts(optional)]
     pub description: Option<String>,
-    /// Binary name: no path separators or shell metacharacters.
+    /// Binary name: no path separators or shell metacharacters, and not a shell or script
+    /// interpreter (`sh`, `bash`, `python3`, `node`, `env`, `powershell`, `cmd`, ...).
     pub binary: String,
     /// Install page; must be `https://`.
     #[serde(default)]
     #[ts(optional)]
     pub install_url: Option<String>,
-    /// Config variable name, `^[A-Z_][A-Z0-9_]{0,63}$`.
+    /// Config variable name: `^[A-Z][A-Z0-9_]{0,47}$` ending in `_CONFIG_DIR`,
+    /// `_CONFIG_HOME`, `_HOME`, `_CONFIG`, `_CONFIG_FILE` or `_DIR`; not a variable of a
+    /// built-in or another custom tool, not an allowlisted base variable, and not in the
+    /// families `XDG_*`, `GIT_*`, `PYTHON*`, `NODE_*`, `NPM_*`, `LD_*`, `DYLD_*`,
+    /// `ANTHROPIC_*`, `CLAUDE_*`, `OPENAI_*`, `CODEX_*`, `GH_*`, `GITHUB_*`, `AWS_*`,
+    /// `AZURE_*`, `CLOUDSDK_*`, `GOOGLE_*`, `SSH_*`, nor `ZDOTDIR` or `HOME`.
     pub config_var: String,
     /// Whether the variable points at a directory or a file.
     pub config_kind: ConfigEnvKind,
@@ -668,15 +685,30 @@ pub struct SyncFailure {
     pub message: String,
 }
 
+/// A server that was deliberately not synced.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+pub struct SyncSkip {
+    /// Server name.
+    pub name: String,
+    /// User-safe reason (for example: it has secret values, which are never put on a
+    /// command line).
+    pub reason: String,
+}
+
 /// Result of `mcp_sync_claude`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 pub struct SyncReport {
     /// Names added or updated in the profile's Claude Code user scope.
     pub synced: Vec<String>,
-    /// Vision-managed names removed (deleted or disabled servers).
+    /// Vision-managed names removed (deleted or disabled servers, or servers now skipped).
     pub removed: Vec<String>,
-    /// Names that failed.
+    /// Names that failed, including a name that already exists in Claude Code but was not
+    /// created by Vision (reported, never removed). A failed remove keeps the name tracked so
+    /// the next sync retries it.
     pub failed: Vec<SyncFailure>,
+    /// Enabled servers that were not synced, with the reason. Servers with any secret env or
+    /// header value are always skipped.
+    pub skipped: Vec<SyncSkip>,
 }
 
 // ---------------------------------------------------------------------------------------
@@ -739,6 +771,7 @@ pub fn typescript_bindings() -> String {
     decl::<McpSaveArgs>(&mut out, &cfg);
     decl::<McpServerArgs>(&mut out, &cfg);
     decl::<SyncFailure>(&mut out, &cfg);
+    decl::<SyncSkip>(&mut out, &cfg);
     decl::<SyncReport>(&mut out, &cfg);
     let trimmed = out.trim_end().len();
     out.truncate(trimmed);

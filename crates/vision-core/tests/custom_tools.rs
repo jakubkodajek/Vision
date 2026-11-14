@@ -18,7 +18,7 @@ fn valid() -> CustomToolInput {
         description: Some("Kubernetes".into()),
         binary: "kubectl".into(),
         install_url: Some("https://kubernetes.io/docs/tasks/tools/".into()),
-        config_var: "KUBECONFIG".into(),
+        config_var: "KUBECTL_CONFIG".into(),
         config_kind: ConfigEnvKind::File,
         login: vec!["config".into(), "view".into()],
         status: Some(vec!["config".into(), "current-context".into()]),
@@ -278,7 +278,7 @@ fn custom_tool_status_uses_its_exit_code_and_config_variable() {
         .tool_dir(&p.id, "kubectl")
         .unwrap()
         .join("config");
-    assert!(common::read(&dump).contains(&format!("KUBECONFIG={}", expected.display())));
+    assert!(common::read(&dump).contains(&format!("KUBECTL_CONFIG={}", expected.display())));
 }
 
 #[test]

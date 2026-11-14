@@ -14,6 +14,8 @@ use crate::ipc::{
     ToolSpecView, ToolStatus,
 };
 use crate::process::CommandOutput;
+use crate::redact::redact;
+use crate::text;
 
 /// One config variable of a tool.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,9 +61,50 @@ pub struct ToolSpec {
     pub isolation: Isolation,
     /// Preset or custom.
     pub builtin: bool,
+    /// For a stored custom tool that no longer validates: why. Such a tool is never run and
+    /// its variable is never exported.
+    pub invalid: Option<String>,
 }
 
 impl ToolSpec {
+    /// Errors with `invalid_input` when this is a stored custom tool that no longer
+    /// validates (it must be edited before it can run).
+    ///
+    /// # Errors
+    /// `invalid_input` with the reason.
+    pub fn ensure_runnable(&self) -> IpcResult<()> {
+        match &self.invalid {
+            Some(reason) => Err(IpcError::invalid_input(format!(
+                "{} cannot be used until it is edited: {reason}",
+                self.name
+            ))),
+            None => Ok(()),
+        }
+    }
+
+    /// Approval fingerprint of a custom tool's executable definition.
+    #[must_use]
+    pub fn fingerprint(&self) -> String {
+        let (var, kind) = self.config_env.first().map_or(("", "dir"), |c| {
+            (
+                c.var.as_str(),
+                match c.kind {
+                    ConfigEnvKind::Dir => "dir",
+                    ConfigEnvKind::File => "file",
+                },
+            )
+        });
+        crate::approvals::custom_tool_fingerprint(
+            &self.binary,
+            var,
+            kind,
+            &self.version,
+            &self.login,
+            self.status.as_deref(),
+            self.logout.as_deref(),
+        )
+    }
+
     /// The UI view.
     #[must_use]
     pub fn view(&self) -> ToolSpecView {
@@ -86,6 +129,7 @@ impl ToolSpec {
             status_parser: self.status_parser,
             isolation: self.isolation,
             builtin: self.builtin,
+            invalid: self.invalid.clone(),
         }
     }
 
@@ -137,6 +181,7 @@ pub fn builtin_tools() -> Vec<ToolSpec> {
         version: argv(&["--version"]),
         isolation: Isolation::Verified,
         builtin: true,
+        invalid: None,
     };
     vec![
         ToolSpec {
@@ -249,23 +294,86 @@ pub const CODEX_CONFIG: &str = "# Written by Vision: keep the Codex login inside
 // Custom tools
 // ---------------------------------------------------------------------------------------
 
-/// Variables a custom tool may not use as its config variable.
-const RESERVED_VARS: &[&str] = &[
-    "PATH",
-    "PATHEXT",
-    "IFS",
-    "ENV",
-    "BASH_ENV",
-    "SHELLOPTS",
-    "PS4",
+/// Suffixes a custom tool's config variable must end with: it has to look like a config
+/// location, not like a behaviour switch (`*_OPTIONS`, `*_COMMAND`, `BROWSER`, ...).
+const CONFIG_VAR_SUFFIXES: &[&str] = &[
+    "_CONFIG_DIR",
+    "_CONFIG_HOME",
+    "_HOME",
+    "_CONFIG",
+    "_CONFIG_FILE",
+    "_DIR",
 ];
 
-fn validate_text(label: &str, s: &str, max: usize) -> IpcResult<()> {
-    let n = s.chars().count();
-    if n == 0 || n > max || s.chars().any(char::is_control) {
-        return Err(IpcError::invalid_input(format!(
-            "{label} must be 1 to {max} characters without control characters"
-        )));
+/// Variable families other programs read, which a custom tool must never redirect.
+const RESERVED_VAR_PREFIXES: &[&str] = &[
+    "XDG_",
+    "GIT_",
+    "PYTHON",
+    "NODE_",
+    "NPM_",
+    "LD_",
+    "DYLD_",
+    "ANTHROPIC_",
+    "CLAUDE_",
+    "OPENAI_",
+    "CODEX_",
+    "GH_",
+    "GITHUB_",
+    "AWS_",
+    "AZURE_",
+    "CLOUDSDK_",
+    "GOOGLE_",
+    "SSH_",
+];
+
+/// Single variables a custom tool must never redirect.
+const RESERVED_VARS: &[&str] = &["ZDOTDIR", "HOME", "PATH", "PATHEXT", "TMPDIR"];
+
+/// Programs that run arbitrary code given as arguments; a custom tool's binary may not be one
+/// of them (compared case-insensitively, `.exe` stripped; `python*` matches any version).
+const INTERPRETERS: &[&str] = &[
+    "sh",
+    "bash",
+    "zsh",
+    "fish",
+    "dash",
+    "ksh",
+    "csh",
+    "tcsh",
+    "env",
+    "node",
+    "deno",
+    "bun",
+    "ruby",
+    "perl",
+    "php",
+    "osascript",
+    "powershell",
+    "pwsh",
+    "cmd",
+    "wscript",
+    "cscript",
+    "sudo",
+    "doas",
+    "xargs",
+    "nohup",
+    "open",
+    "xdg-open",
+];
+
+/// Validates a custom tool binary: [`validate_binary`] and not a shell or interpreter.
+///
+/// # Errors
+/// `invalid_input` otherwise.
+pub fn validate_custom_binary(b: &str) -> IpcResult<()> {
+    validate_binary(b)?;
+    let lower = b.to_ascii_lowercase();
+    let stem = lower.strip_suffix(".exe").unwrap_or(&lower);
+    if INTERPRETERS.contains(&stem) || stem.starts_with("python") {
+        return Err(IpcError::invalid_input(
+            "The binary cannot be a shell or script interpreter (sh, bash, python, node, env, powershell, cmd, ...): use the tool's own program",
+        ));
     }
     Ok(())
 }
@@ -331,52 +439,75 @@ pub fn validate_argv(label: &str, args: &[String], allow_empty: bool) -> IpcResu
     Ok(())
 }
 
-/// Validates an environment variable name for a custom tool's config variable.
+/// Validates a custom tool's config variable.
+///
+/// The name must match `^[A-Z][A-Z0-9_]{0,47}$`, end with one of `_CONFIG_DIR`,
+/// `_CONFIG_HOME`, `_HOME`, `_CONFIG`, `_CONFIG_FILE`, `_DIR`, and must not be an
+/// allowlisted base variable, a variable of a built-in tool, one of `taken` (other custom
+/// tools' variables), or in a reserved family (`XDG_*`, `GIT_*`, `PYTHON*`, `NODE_*`,
+/// `NPM_*`, `LD_*`, `DYLD_*`, `ANTHROPIC_*`, `CLAUDE_*`, `OPENAI_*`, `CODEX_*`, `GH_*`,
+/// `GITHUB_*`, `AWS_*`, `AZURE_*`, `CLOUDSDK_*`, `GOOGLE_*`, `SSH_*`, `ZDOTDIR`, `HOME`).
+/// Well-known homes of other software such as `JAVA_HOME` are accepted.
 ///
 /// # Errors
-/// `invalid_input` for names outside `^[A-Z_][A-Z0-9_]{0,63}$`, allowlisted base names,
-/// loader variables (`LD_*`, `DYLD_*`) and shell-startup variables.
-pub fn validate_config_var(v: &str) -> IpcResult<()> {
+/// `invalid_input` otherwise.
+pub fn validate_config_var(v: &str, taken: &[String]) -> IpcResult<()> {
     let b = v.as_bytes();
     let shape = !b.is_empty()
-        && b.len() <= 64
-        && (b[0].is_ascii_uppercase() || b[0] == b'_')
+        && b.len() <= 48
+        && b[0].is_ascii_uppercase()
         && b.iter()
-            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == b'_');
-    let reserved = RESERVED_VARS.contains(&v)
-        || crate::env::is_allowed(v, true)
-        || v.starts_with("LD_")
-        || v.starts_with("DYLD_");
-    if !shape || reserved {
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == b'_')
+        && CONFIG_VAR_SUFFIXES
+            .iter()
+            .any(|s| v.len() > s.len() && v.ends_with(s));
+    if !shape {
         return Err(IpcError::invalid_input(
-            "The config variable must be an upper-case name like MYTOOL_CONFIG_DIR and not a system variable",
+            "The config variable must be an upper-case name ending in _CONFIG_DIR, _CONFIG_HOME, _HOME, _CONFIG, _CONFIG_FILE or _DIR, like MYTOOL_CONFIG_DIR",
+        ));
+    }
+    let builtin = builtin_tools()
+        .iter()
+        .flat_map(|t| t.config_env.iter().map(|c| c.var.clone()))
+        .any(|b| b.eq_ignore_ascii_case(v));
+    let reserved = RESERVED_VARS.contains(&v)
+        || RESERVED_VAR_PREFIXES.iter().any(|p| v.starts_with(p))
+        || crate::env::is_allowed(v, true);
+    if builtin || reserved {
+        return Err(IpcError::invalid_input(
+            "This config variable is used by the system or by another program, so a custom tool cannot set it",
+        ));
+    }
+    if taken.iter().any(|t| t.eq_ignore_ascii_case(v)) {
+        return Err(IpcError::invalid_input(
+            "Another custom tool already uses this config variable",
         ));
     }
     Ok(())
 }
 
-/// Validates a custom tool and turns it into a registry entry.
+/// Validates a custom tool and turns it into a registry entry. `taken` holds the config
+/// variables of the other custom tools.
 ///
 /// # Errors
 /// `invalid_input` for any invalid field, `conflict` when the id is a preset id.
-pub fn custom_tool_spec(input: &CustomToolInput) -> IpcResult<ToolSpec> {
+pub fn custom_tool_spec(input: &CustomToolInput, taken: &[String]) -> IpcResult<ToolSpec> {
     ids::validate_tool_id(&input.id)?;
     if builtin_tools().iter().any(|t| t.id == input.id) {
         return Err(IpcError::conflict("This id belongs to a built-in tool"));
     }
-    validate_text("The name", input.name.trim(), 40)?;
-    if let Some(d) = &input.description
-        && !d.is_empty()
-    {
-        validate_text("The description", d, 200)?;
-    }
-    validate_binary(&input.binary)?;
+    let name = text::display_text("The name", &input.name, 40)?;
+    let description = match &input.description {
+        Some(d) if !d.trim().is_empty() => text::display_text("The description", d, 200)?,
+        _ => String::new(),
+    };
+    validate_custom_binary(&input.binary)?;
     if let Some(u) = &input.install_url
         && !u.is_empty()
     {
         validate_https_url(u)?;
     }
-    validate_config_var(&input.config_var)?;
+    validate_config_var(&input.config_var, taken)?;
     validate_argv("Sign-in command", &input.login, false)?;
     if let Some(s) = &input.status {
         validate_argv("Status command", s, false)?;
@@ -385,9 +516,24 @@ pub fn custom_tool_spec(input: &CustomToolInput) -> IpcResult<ToolSpec> {
         validate_argv("Sign-out command", s, false)?;
     }
     Ok(ToolSpec {
+        name,
+        description,
+        ..unchecked_custom_tool_spec(input, None)
+    })
+}
+
+/// A registry entry for a stored custom tool that no longer validates: listed (with
+/// `reason`) so the user can fix it, but never run and never exported.
+#[must_use]
+pub fn invalid_custom_tool_spec(input: &CustomToolInput, reason: String) -> ToolSpec {
+    unchecked_custom_tool_spec(input, Some(reason))
+}
+
+fn unchecked_custom_tool_spec(input: &CustomToolInput, invalid: Option<String>) -> ToolSpec {
+    ToolSpec {
         id: input.id.clone(),
-        name: input.name.trim().to_owned(),
-        description: input.description.clone().unwrap_or_default(),
+        name: clean_text(&input.name, 40),
+        description: clean_text(input.description.as_deref().unwrap_or(""), 200),
         binary: input.binary.clone(),
         install_url: input.install_url.clone().filter(|u| !u.is_empty()),
         config_env: vec![ConfigEnv {
@@ -407,7 +553,8 @@ pub fn custom_tool_spec(input: &CustomToolInput) -> IpcResult<ToolSpec> {
         version: argv(&["--version"]),
         isolation: Isolation::Unverified,
         builtin: false,
-    })
+        invalid,
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -417,10 +564,14 @@ pub fn custom_tool_spec(input: &CustomToolInput) -> IpcResult<ToolSpec> {
 /// Maximum length of labels and messages taken from CLI output.
 const MAX_LABEL: usize = 160;
 
-/// Cleans untrusted text from CLI output: control characters removed, length capped.
+/// Cleans untrusted text from CLI or server output: control and format (bidi, zero-width)
+/// characters removed, length capped.
 #[must_use]
 pub fn clean_text(s: &str, max: usize) -> String {
-    let cleaned: String = s.chars().filter(|c| !c.is_control()).collect();
+    let cleaned: String = s
+        .chars()
+        .filter(|c| !c.is_control() && !text::is_format(*c))
+        .collect();
     let trimmed = cleaned.trim();
     if trimmed.chars().count() > max {
         let mut t: String = trimmed.chars().take(max).collect();
@@ -448,7 +599,7 @@ fn first_line(out: &CommandOutput) -> String {
             None => "The status command printed nothing".to_owned(),
         }
     } else {
-        clean_text(line, MAX_LABEL)
+        clean_text(&redact(line), MAX_LABEL)
     }
 }
 
@@ -534,10 +685,24 @@ fn parse_codex(out: &CommandOutput) -> ToolStatus {
         String::from_utf8_lossy(&out.stderr)
     )
     .to_lowercase();
-    if text.contains("not logged in") || text.contains("not signed in") {
+    // Negative phrases first; a positive answer must start a line ("Logged in using ..."),
+    // so an error such as "Error: token expired, you are no longer logged in" or
+    // "Could not check whether you are logged in" is not mistaken for a sign-in.
+    if [
+        "not logged in",
+        "not signed in",
+        "no longer logged in",
+        "logged out",
+    ]
+    .iter()
+    .any(|p| text.contains(p))
+    {
         return ToolStatus::SignedOut;
     }
-    if text.contains("logged in") {
+    if text
+        .lines()
+        .any(|l| l.trim_start().starts_with("logged in"))
+    {
         // Never echo the line: with an API key it contains a key prefix.
         if text.contains("api key") {
             return signed_in(
@@ -733,13 +898,59 @@ pub fn parse_status(parser: StatusParser, out: &CommandOutput, tool_dir: &Path) 
     }
 }
 
-/// Extracts a version label from `--version` output.
+/// Extracts a version from `--version` output: only after a successful exit, from stdout
+/// (stderr when stdout is empty), the first token that looks like a version
+/// (`\d+\.\d+(\.\d+)?` optionally followed by `-pre`/`+build` characters); otherwise none.
 #[must_use]
 pub fn parse_version(out: &CommandOutput) -> Option<String> {
-    if out.timed_out {
+    if out.timed_out || out.exit_code != Some(0) {
         return None;
     }
-    let text = String::from_utf8_lossy(&out.stdout);
-    let line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
-    Some(clean_text(line, 80))
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let text = if stdout.trim().is_empty() {
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    } else {
+        stdout.into_owned()
+    };
+    text.split(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | ',' | ';' | '"' | '\''))
+        .find_map(version_token)
+}
+
+/// Returns the version part of `word` (`v1.2.3`, `1.2`, `2.1.0-beta.1`), if any.
+fn version_token(word: &str) -> Option<String> {
+    let w = word.trim_start_matches(['v', 'V']);
+    let mut dots = 0usize;
+    let mut pending_dot = false;
+    let mut end = 0usize;
+    let mut digits = false;
+    for (i, c) in w.char_indices() {
+        if c.is_ascii_digit() {
+            if pending_dot {
+                dots += 1;
+                pending_dot = false;
+            }
+            digits = true;
+            end = i + 1;
+        } else if c == '.' && digits && dots < 2 {
+            pending_dot = true;
+            digits = false;
+        } else {
+            break;
+        }
+    }
+    if dots == 0 {
+        return None;
+    }
+    // Keep a pre-release/build suffix made of safe characters.
+    let suffix: String = w[end..]
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '+' | '.'))
+        .take(24)
+        .collect();
+    let suffix = if suffix.starts_with(['-', '+']) {
+        suffix.trim_end_matches('.').to_owned()
+    } else {
+        String::new()
+    };
+    Some(format!("{}{suffix}", &w[..end]))
 }

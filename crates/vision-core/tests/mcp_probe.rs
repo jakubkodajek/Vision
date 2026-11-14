@@ -395,3 +395,323 @@ fn http_oversized_response_is_an_error() {
     );
     assert_eq!(v.health.status, McpHealthStatus::Error);
 }
+
+// ---- BUG-4 .. BUG-7: stdio probe robustness ---------------------------------------------
+
+#[test]
+fn a_banner_line_before_json_rpc_is_skipped() {
+    let v = run_stdio(&Harness::new(), json!({"mode": "banner"}));
+    assert_eq!(v.health.status, McpHealthStatus::Ok);
+}
+
+#[test]
+fn a_server_ping_during_initialize_is_answered_with_an_empty_result() {
+    let v = run_stdio(&Harness::new(), json!({"mode": "ping-first"}));
+    assert_eq!(v.health.status, McpHealthStatus::Ok);
+}
+
+#[test]
+fn an_unsupported_server_request_is_answered_with_method_not_found() {
+    let v = run_stdio(&Harness::new(), json!({"mode": "server-request"}));
+    assert_eq!(v.health.status, McpHealthStatus::Ok);
+}
+
+#[test]
+fn a_repeated_cursor_ends_the_tool_listing() {
+    let v = run_stdio(&Harness::new(), json!({"mode": "same-cursor"}));
+    assert_eq!(v.health.status, McpHealthStatus::Ok);
+}
+
+#[test]
+fn tools_repeated_across_pages_are_listed_once() {
+    let v = run_stdio(&Harness::new(), json!({"mode": "same-cursor"}));
+    assert_eq!(
+        v.health
+            .tools
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["echo"]
+    );
+}
+
+#[test]
+fn an_early_exit_reports_the_exit_code() {
+    let v = run_stdio(&Harness::new(), json!({"mode": "stderr-exit"}));
+    let msg = v.health.message.unwrap_or_default();
+    assert!(msg.contains("exit code 3"), "{msg}");
+}
+
+#[test]
+fn an_early_exit_reports_the_last_non_empty_stderr_line() {
+    let v = run_stdio(&Harness::new(), json!({"mode": "stderr-exit"}));
+    let msg = v.health.message.unwrap_or_default();
+    assert!(
+        msg.contains("GITHUB_TOKEN is required") && !msg.contains("Starting server"),
+        "{msg}"
+    );
+}
+
+#[test]
+fn a_missing_command_says_it_was_not_found() {
+    let h = Harness::new();
+    let core = h.core();
+    let p = create_profile(&core, "Work");
+    let s = stdio_server(&core, &p.id, "does-not-exist");
+    let msg = test(&core, &p.id, &s.id).health.message.unwrap_or_default();
+    assert!(msg.contains("not found"), "{msg}");
+}
+
+// ---- BUG-1 / BUG-2 / AC16: a probe never resurrects or reverts data ---------------------
+
+/// Starts `mcp_test` of a slow server on another thread, waits until the server process is
+/// running, runs `during`, and returns the probe's result.
+fn race(
+    during: impl FnOnce(&Core, &str, &str),
+) -> (
+    vision_core::ipc::IpcResult<McpServerView>,
+    Core,
+    String,
+    Harness,
+) {
+    let h = Harness::new();
+    let pids = h.path("pids.txt");
+    h.install_fake(
+        "fake-mcp",
+        json!({"mcp": {"mode": "ok", "init_delay_ms": 1500, "pid_file": pids.to_str().unwrap()}}),
+    );
+    let core = h.core();
+    let p = create_profile(&core, "Work");
+    let s = stdio_server(&core, &p.id, "fake-mcp");
+    let result = std::thread::scope(|scope| {
+        let probing = scope.spawn(|| {
+            core.mcp_test(McpServerArgs {
+                profile_id: p.id.clone(),
+                server_id: s.id.clone(),
+            })
+        });
+        let started = Instant::now();
+        while !pids.exists() && started.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        during(&core, &p.id, &s.id);
+        probing.join().unwrap()
+    });
+    (result, core, p.id, h)
+}
+
+fn rename(core: &Core, pid: &str, id: &str) {
+    core.mcp_save(McpSaveArgs {
+        profile_id: pid.into(),
+        server: McpServerInput {
+            id: Some(id.into()),
+            name: "renamed".into(),
+            transport: McpTransportInput::Stdio {
+                command: "fake-mcp".into(),
+                args: vec![],
+                env: vec![],
+            },
+            tool_ids: vec![],
+            enabled: false,
+        },
+    })
+    .unwrap();
+}
+
+fn listed(core: &Core, pid: &str) -> Vec<McpServerView> {
+    core.mcp_list(vision_core::ipc::ProfileScopeArgs {
+        profile_id: pid.into(),
+    })
+    .unwrap()
+}
+
+#[test]
+fn a_probe_finishing_after_an_edit_keeps_the_edit() {
+    let (_, core, pid, _h) = race(rename);
+    assert_eq!(
+        listed(&core, &pid)
+            .iter()
+            .map(|s| (s.name.clone(), s.enabled))
+            .collect::<Vec<_>>(),
+        vec![("renamed".to_owned(), false)]
+    );
+}
+
+#[test]
+fn a_probe_finishing_after_an_edit_stores_no_stale_health() {
+    let (_, core, pid, _h) = race(rename);
+    assert_eq!(
+        listed(&core, &pid)[0].health.status,
+        McpHealthStatus::Untested
+    );
+}
+
+#[test]
+fn a_probe_finishing_after_an_edit_returns_the_current_server() {
+    let (result, _, _, _h) = race(rename);
+    assert_eq!(result.unwrap().name, "renamed");
+}
+
+#[test]
+fn a_probe_finishing_after_a_delete_does_not_resurrect_the_server() {
+    let (_, core, pid, _h) = race(|core, pid, id| {
+        core.mcp_delete(McpServerArgs {
+            profile_id: pid.into(),
+            server_id: id.into(),
+        })
+        .unwrap();
+    });
+    assert!(listed(&core, &pid).is_empty());
+}
+
+#[test]
+fn a_probe_finishing_after_a_delete_is_not_found() {
+    let (result, _, _, _h) = race(|core, pid, id| {
+        core.mcp_delete(McpServerArgs {
+            profile_id: pid.into(),
+            server_id: id.into(),
+        })
+        .unwrap();
+    });
+    assert_eq!(
+        result.unwrap_err().code,
+        vision_core::ipc::ErrorCode::NotFound
+    );
+}
+
+// ---- HTTP: redirects, silent streams, server requests in SSE ----------------------------
+
+#[test]
+fn an_http_redirect_names_its_target() {
+    let (v, _) = run_http(
+        Arc::new(|_: &Request| {
+            response(
+                "302 Found",
+                "text/plain",
+                "Location: https://login.example.com/next\r\n",
+                "",
+            )
+        }),
+        vec![],
+    );
+    let msg = v.health.message.unwrap_or_default();
+    assert!(msg.contains("https://login.example.com/next"), "{msg}");
+}
+
+#[test]
+fn a_silent_event_stream_times_out_with_a_message() {
+    let (v, _) = run_http(
+        Arc::new(|_: &Request| {
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n".to_owned()
+        }),
+        vec![],
+    );
+    let msg = v.health.message.unwrap_or_default();
+    assert!(
+        v.health.status == McpHealthStatus::Error && msg.contains("stayed open"),
+        "{msg}"
+    );
+}
+
+fn sse_ping_handler() -> Handler {
+    let inner = mcp_handler(true);
+    Arc::new(move |req: &Request| {
+        let msg: Value = serde_json::from_str(&req.body).unwrap_or(Value::Null);
+        if msg["method"] == "initialize" {
+            let rpc = json!({"jsonrpc": "2.0", "id": msg["id"], "result": {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}, "serverInfo": {"name": "http-fake", "version": "9"}}});
+            let body = format!(
+                "event: message\ndata: {{\"jsonrpc\":\"2.0\",\"id\":\"srv-ping-1\",\"method\":\"ping\"}}\n\nevent: message\ndata: {rpc}\n\n"
+            );
+            return response(
+                "200 OK",
+                "text/event-stream",
+                "Mcp-Session-Id: sess-123\r\n",
+                &body,
+            );
+        }
+        inner(req)
+    })
+}
+
+#[test]
+fn a_ping_inside_an_event_stream_is_answered_with_an_empty_result() {
+    let (_, log) = run_http(sse_ping_handler(), vec![]);
+    let answered = log.lock().unwrap().iter().any(|r| {
+        serde_json::from_str::<Value>(&r.body).ok()
+            == Some(json!({"jsonrpc": "2.0", "id": "srv-ping-1", "result": {}}))
+    });
+    assert!(answered);
+}
+
+#[test]
+fn a_ping_inside_an_event_stream_does_not_break_the_probe() {
+    let (v, _) = run_http(sse_ping_handler(), vec![]);
+    assert_eq!(v.health.status, McpHealthStatus::Ok);
+}
+
+#[test]
+fn keepalive_comments_do_not_extend_the_probe_timeout() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!(
+        "http://127.0.0.1:{}/mcp",
+        listener.local_addr().unwrap().port()
+    );
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n",
+                );
+                for _ in 0..100 {
+                    if stream.write_all(b"d\r\n: keepalive\n\n\r\n").is_err() {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+            });
+        }
+    });
+    let h = Harness::new();
+    let core = h.core();
+    let p = create_profile(&core, "Work");
+    let s = http_server(&core, &p.id, &url, vec![]);
+    let started = Instant::now();
+    let v = test(&core, &p.id, &s.id);
+    assert!(
+        v.health.status == McpHealthStatus::Error && started.elapsed() < Duration::from_secs(9),
+        "{:?} after {:?}",
+        v.health.message,
+        started.elapsed()
+    );
+}
+
+#[test]
+fn other_commands_stay_responsive_during_a_slow_probe() {
+    let h = Harness::new();
+    let pids = h.path("pids.txt");
+    h.install_fake(
+        "fake-mcp",
+        json!({"mcp": {"mode": "ok", "init_delay_ms": 2000, "pid_file": pids.to_str().unwrap()}}),
+    );
+    let core = h.core();
+    let p = create_profile(&core, "Work");
+    let s = stdio_server(&core, &p.id, "fake-mcp");
+    let listed_in = std::thread::scope(|scope| {
+        let probing = scope.spawn(|| test(&core, &p.id, &s.id));
+        let started = Instant::now();
+        while !pids.exists() && started.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let t = Instant::now();
+        core.mcp_list(vision_core::ipc::ProfileScopeArgs {
+            profile_id: p.id.clone(),
+        })
+        .unwrap();
+        let listed_in = t.elapsed();
+        probing.join().unwrap();
+        listed_in
+    });
+    assert!(listed_in < Duration::from_millis(500), "{listed_in:?}");
+}

@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tauri::{Manager, State};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+use vision_core::approvals::Confirmer;
 use vision_core::ipc::{
     Accent, AppInfo, Bootstrap, CustomToolInput, CustomToolSaveArgs, McpSaveArgs, McpServerArgs,
     McpServerInput, McpServerView, Profile, ProfileCreateArgs, ProfileDeleteArgs, ProfileKind,
@@ -308,9 +310,34 @@ fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, IpcError> {
     }
 }
 
+/// Native confirmation dialog (SEC-1) shown before a user-defined command first runs.
+///
+/// The core calls it from the blocking thread pool, never from the main thread, so the
+/// blocking call cannot deadlock the event loop. The webview has no dialog permission: only
+/// this Rust code can open it.
+struct DialogConfirmer {
+    app: tauri::AppHandle,
+}
+
+impl Confirmer for DialogConfirmer {
+    fn confirm(&self, title: &str, message: &str) -> bool {
+        self.app
+            .dialog()
+            .message(message)
+            .title(title)
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Run".to_owned(),
+                "Cancel".to_owned(),
+            ))
+            .blocking_show()
+    }
+}
+
 fn start_core(app: &tauri::AppHandle) -> Result<Arc<Core>, IpcError> {
     let dir = data_dir(app)?;
-    Core::open(dir, CoreDeps::system()).map(Arc::new)
+    let confirmer = Arc::new(DialogConfirmer { app: app.clone() });
+    Core::open(dir, CoreDeps::system(confirmer)).map(Arc::new)
 }
 
 /// Starts the desktop app.
@@ -319,6 +346,14 @@ fn start_core(app: &tauri::AppHandle) -> Result<Arc<Core>, IpcError> {
 /// Panics if the Tauri runtime fails to start.
 pub fn run() {
     tauri::Builder::default()
+        // Must be the first plugin: a second launch focuses the running window and exits.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let core = start_core(app.handle());
             match &core {

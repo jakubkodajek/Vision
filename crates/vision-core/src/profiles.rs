@@ -7,31 +7,20 @@ use crate::ipc::{Accent, IpcError, IpcResult, Profile, ProfileKind};
 /// Setting key of the active profile id.
 pub const ACTIVE_PROFILE_KEY: &str = "active_profile_id";
 
-/// Validates and normalises a profile name: trimmed, 1 to 40 characters, no control
-/// characters.
+/// Validates and normalises a profile name: trimmed, NFC, 1 to 40 characters after
+/// normalisation, no control or format (zero-width, bidi) characters, at least one visible
+/// character ([`crate::text::display_text`]).
 ///
 /// # Errors
 /// `invalid_input` otherwise.
 pub fn normalize_name(name: &str) -> IpcResult<String> {
-    let n = name.trim();
-    let len = n.chars().count();
-    if len == 0 || len > 40 {
-        return Err(IpcError::invalid_input(
-            "Profile names must be 1 to 40 characters",
-        ));
-    }
-    if n.chars().any(char::is_control) {
-        return Err(IpcError::invalid_input(
-            "Profile names cannot contain control characters",
-        ));
-    }
-    Ok(n.to_owned())
+    crate::text::display_text("Profile names", name, 40)
 }
 
-/// Case-insensitive uniqueness key of a name.
+/// Uniqueness key of a name: NFKC + lower-case ([`crate::text::name_key`]).
 #[must_use]
 pub fn name_key(name: &str) -> String {
-    name.to_lowercase()
+    crate::text::name_key(name)
 }
 
 fn kind_str(k: ProfileKind) -> &'static str {
@@ -106,13 +95,12 @@ pub fn get(conn: &Connection, id: &str) -> IpcResult<Profile> {
     .ok_or_else(|| IpcError::not_found("Profile not found"))
 }
 
+/// Compares keys computed now from every stored name (rows written by older builds stored a
+/// plain lower-case key, so the column alone is not enough).
 fn name_taken(conn: &Connection, key: &str, except: Option<&str>) -> IpcResult<bool> {
-    let found: Option<String> = conn
-        .query_row("SELECT id FROM profiles WHERE name_key = ?1", [key], |r| {
-            r.get(0)
-        })
-        .optional()?;
-    Ok(found.is_some_and(|id| Some(id.as_str()) != except))
+    Ok(list(conn)?
+        .iter()
+        .any(|p| Some(p.id.as_str()) != except && name_key(&p.name) == key))
 }
 
 /// Inserts a profile row.

@@ -19,6 +19,7 @@ use serde_json::{Value, json};
 use super::MAX_MESSAGE_BYTES;
 use crate::ipc::{McpHealthStatus, McpToolInfo};
 use crate::process::{GroupChild, Pipes};
+use crate::redact::redact;
 use crate::secrets::SecretString;
 use crate::tools::clean_text;
 
@@ -146,11 +147,32 @@ fn tools_list_request(id: u64, cursor: Option<&str>) -> Value {
     }
 }
 
+/// Answers for the requests a server sent in `msg` (object or batch): an empty result for
+/// `ping` (the spec says clients should answer it) and JSON-RPC error -32601 for anything
+/// else, since Vision's health check offers no client capabilities.
+fn answers_to_server_requests(msg: &Value) -> Vec<Value> {
+    let answer = |m: &Value| -> Option<Value> {
+        let method = m.get("method")?.as_str()?;
+        let id = m.get("id").filter(|i| i.is_string() || i.is_number())?;
+        Some(if method == "ping" {
+            json!({ "jsonrpc": "2.0", "id": id, "result": {} })
+        } else {
+            json!({ "jsonrpc": "2.0", "id": id,
+                    "error": { "code": -32601, "message": "Method not found" } })
+        })
+    };
+    match msg {
+        Value::Array(items) => items.iter().filter_map(answer).collect(),
+        Value::Object(_) => answer(msg).into_iter().collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// Finds the response to `id` in a message (object or batch). `Ok(None)` when the message
 /// is something else (a notification or a server request).
 fn match_response(msg: &Value, id: u64) -> Result<Option<Value>, String> {
     let check = |m: &Value| -> Option<Result<Value, String>> {
-        if m.get("id").and_then(Value::as_u64) != Some(id) {
+        if m.get("id").and_then(Value::as_u64) != Some(id) || m.get("method").is_some() {
             return None;
         }
         if let Some(r) = m.get("result") {
@@ -163,7 +185,7 @@ fn match_response(msg: &Value, id: u64) -> Result<Option<Value>, String> {
                 .unwrap_or("unknown error");
             return Some(Err(format!(
                 "The server returned an error: {}",
-                clean_text(text, 200)
+                server_text(text, 200)
             )));
         }
         None
@@ -228,7 +250,7 @@ fn read_tools(result: &Value, into: &mut Vec<McpToolInfo>) -> Option<String> {
             continue;
         };
         let name = clean_text(name, 128);
-        if name.is_empty() {
+        if name.is_empty() || into.iter().any(|t| t.name == name) {
             continue;
         }
         let description = t
@@ -257,12 +279,16 @@ fn session(
         let mut tools = Vec::new();
         if init.has_tools {
             let mut cursor: Option<String> = None;
+            let mut seen = std::collections::BTreeSet::new();
             for page in 0..MAX_PAGES {
                 let id = 2 + page as u64;
                 let result = call(&tools_list_request(id, cursor.as_deref()), id)?;
                 cursor = read_tools(&result, &mut tools);
-                if cursor.is_none() || tools.len() >= MAX_TOOLS {
-                    break;
+                // Stop on the last page, on a full list, and on a cursor seen before
+                // (a server that keeps returning the same page).
+                match &cursor {
+                    Some(c) if tools.len() < MAX_TOOLS && seen.insert(c.clone()) => {}
+                    _ => break,
                 }
             }
         }
@@ -298,6 +324,20 @@ fn timeout_msg(timeout: Duration) -> String {
         timeout.as_secs().max(1)
     )
 }
+
+/// Server text shown in a health message: control/format characters removed, key-like
+/// tokens redacted, at most `max` characters.
+fn server_text(s: &str, max: usize) -> String {
+    clean_text(&redact(s), max)
+}
+
+/// Most non-JSON stdout lines skipped before a stdio server is declared broken (some
+/// servers print a banner or log lines on stdout).
+pub const MAX_NOISE_LINES: usize = 100;
+/// Bytes of a stdio server's stderr kept (the end of it) for the health message.
+pub const STDERR_TAIL_BYTES: usize = 4096;
+/// Longest stderr line quoted in a health message.
+pub const STDERR_LINE_CHARS: usize = 300;
 
 // ---------------------------------------------------------------------------------------
 // stdio
@@ -364,24 +404,43 @@ fn probe_stdio(
     let pipes = Pipes {
         stdin: true,
         stdout: true,
-        stderr: false,
+        stderr: true,
     };
     let mut child = match GroupChild::spawn(program, &args, env, cwd, pipes) {
         Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return ProbeOutcome::error("Could not start the server: the command was not found");
+        }
         Err(e) => return ProbeOutcome::error(format!("Could not start the server: {}", e.kind())),
     };
     let (Some(stdin), Some(stdout)) = (child.take_stdin(), child.take_stdout()) else {
         child.kill_group();
         return ProbeOutcome::error("Could not connect to the server's input and output");
     };
+    let stderr = child.take_stderr().map(StderrTail::start);
     let rx = spawn_line_reader(stdout);
     let stdin = std::cell::RefCell::new(stdin);
+    let exited = std::cell::Cell::new(false);
+    let noise = std::cell::Cell::new(0usize);
     let send = |msg: &Value| -> Result<(), Failure> {
         let mut w = stdin.borrow_mut();
         let line = format!("{msg}\n");
         w.write_all(line.as_bytes())
             .and_then(|()| w.flush())
-            .map_err(|_| Failure::Error("The server closed its input before answering".to_owned()))
+            .map_err(|_| {
+                exited.set(true);
+                Failure::Error("The server closed its input before answering".to_owned())
+            })
+    };
+    let timed_out = || -> Failure {
+        if noise.get() > 0 {
+            Failure::Error(format!(
+                "{}; it printed output that is not JSON-RPC",
+                timeout_msg(timeout)
+            ))
+        } else {
+            Failure::Error(timeout_msg(timeout))
+        }
     };
     let outcome = session(
         |msg, id| {
@@ -389,16 +448,27 @@ fn probe_stdio(
             loop {
                 let left = deadline.saturating_duration_since(Instant::now());
                 if left.is_zero() {
-                    return Err(timeout_msg(timeout).into());
+                    return Err(timed_out());
                 }
                 match rx.recv_timeout(left) {
                     Ok(LineEvent::Line(bytes)) => {
                         if bytes.iter().all(u8::is_ascii_whitespace) {
                             continue;
                         }
-                        let v: Value = serde_json::from_slice(&bytes).map_err(|_| {
-                            Failure::Error("The server sent output that is not JSON-RPC".to_owned())
-                        })?;
+                        let Ok(v) = serde_json::from_slice::<Value>(&bytes) else {
+                            // A banner or log line on stdout: skip a bounded number.
+                            noise.set(noise.get() + 1);
+                            if noise.get() > MAX_NOISE_LINES {
+                                return Err(Failure::Error(
+                                    "The server sent too much output that is not JSON-RPC"
+                                        .to_owned(),
+                                ));
+                            }
+                            continue;
+                        };
+                        for answer in answers_to_server_requests(&v) {
+                            send(&answer)?;
+                        }
                         if let Some(r) = match_response(&v, id)? {
                             return Ok(r);
                         }
@@ -409,16 +479,87 @@ fn probe_stdio(
                             .into());
                     }
                     Ok(LineEvent::Eof) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        exited.set(true);
                         return Err("The server exited before answering".to_owned().into());
                     }
-                    Err(mpsc::RecvTimeoutError::Timeout) => return Err(timeout_msg(timeout).into()),
+                    Err(mpsc::RecvTimeoutError::Timeout) => return Err(timed_out()),
                 }
             }
         },
         |msg| send(msg),
     );
+    let outcome = if exited.get() && outcome.status == McpHealthStatus::Error {
+        // Give the server a moment to finish exiting and flushing stderr, then say why.
+        let grace = Instant::now() + Duration::from_millis(500);
+        let code = child
+            .wait_until(grace)
+            .ok()
+            .flatten()
+            .and_then(|s| s.code());
+        let line = stderr.and_then(|t| t.last_line(grace));
+        ProbeOutcome::error(exit_message(code, line.as_deref()))
+    } else {
+        outcome
+    };
     child.kill_group();
     outcome
+}
+
+/// "The server exited before answering (exit code 1): <last stderr line>".
+fn exit_message(code: Option<i32>, stderr_line: Option<&str>) -> String {
+    let mut m = "The server exited before answering".to_owned();
+    if let Some(c) = code {
+        m.push_str(&format!(" (exit code {c})"));
+    }
+    if let Some(l) = stderr_line {
+        m.push_str(": ");
+        m.push_str(l);
+    }
+    m
+}
+
+/// The last [`STDERR_TAIL_BYTES`] of a server's stderr, drained by a thread so the server
+/// never blocks on a full pipe.
+struct StderrTail {
+    buf: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    done: mpsc::Receiver<()>,
+}
+
+impl StderrTail {
+    fn start(mut r: impl Read + Send + 'static) -> Self {
+        let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let shared = std::sync::Arc::clone(&buf);
+        let (tx, done) = mpsc::channel();
+        thread::spawn(move || {
+            let mut chunk = [0u8; 4096];
+            loop {
+                match r.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        if let Ok(mut b) = shared.lock() {
+                            b.extend_from_slice(&chunk[..n]);
+                            let excess = b.len().saturating_sub(STDERR_TAIL_BYTES);
+                            b.drain(..excess);
+                        }
+                    }
+                }
+            }
+            let _ = tx.send(());
+        });
+        Self { buf, done }
+    }
+
+    /// The last non-empty line (cleaned, redacted, capped), waiting for EOF until `deadline`.
+    fn last_line(self, deadline: Instant) -> Option<String> {
+        let _ = self
+            .done
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()));
+        let bytes = self.buf.lock().ok()?.clone();
+        let text = String::from_utf8_lossy(&bytes);
+        text.lines()
+            .map(|l| server_text(l, STDERR_LINE_CHARS))
+            .rfind(|l| !l.is_empty())
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -478,8 +619,17 @@ fn map_ureq(e: &ureq::Error, timeout: Duration) -> Failure {
     })
 }
 
-/// Reads an SSE stream until the JSON-RPC response to `id` arrives.
-fn read_sse(reader: impl Read, id: u64) -> Result<Value, Failure> {
+/// Reads an SSE stream until the JSON-RPC response to `id` arrives. Requests the server
+/// sends on the stream (`ping`, ...) are passed to `reply` with the answer to POST back.
+/// `deadline`/`timeout` turn a read that fails because the time ran out (a silent stream)
+/// into the timeout message.
+fn read_sse(
+    reader: impl Read,
+    id: u64,
+    deadline: Instant,
+    timeout: Duration,
+    reply: &mut dyn FnMut(&Value),
+) -> Result<Value, Failure> {
     let mut r = BufReader::new(reader);
     let mut data = String::new();
     let mut line = String::new();
@@ -488,6 +638,13 @@ fn read_sse(reader: impl Read, id: u64) -> Result<Value, Failure> {
         let n = r.read_line(&mut line).map_err(|e| {
             if e.to_string().to_lowercase().contains("limit") {
                 Failure::Error("The server sent a response larger than 1 MiB".to_owned())
+            } else if Instant::now() + Duration::from_millis(50) >= deadline
+                || e.kind() == std::io::ErrorKind::TimedOut
+            {
+                Failure::Error(format!(
+                    "{} (the event stream stayed open without a response)",
+                    timeout_msg(timeout)
+                ))
             } else {
                 Failure::Error("The event stream was interrupted".to_owned())
             }
@@ -498,6 +655,9 @@ fn read_sse(reader: impl Read, id: u64) -> Result<Value, Failure> {
                 let v: Value = serde_json::from_str(&data).map_err(|_| {
                     Failure::Error("The server sent an event that is not JSON-RPC".to_owned())
                 })?;
+                for answer in answers_to_server_requests(&v) {
+                    reply(&answer);
+                }
                 if let Some(r) = match_response(&v, id)? {
                     return Ok(r);
                 }
@@ -565,6 +725,23 @@ impl HttpSession<'_> {
         if status == 401 || status == 403 {
             return Err(Failure::NeedsAuth);
         }
+        if (300..400).contains(&status) {
+            // Never followed (headers may hold secrets); name the target as a hint.
+            let target = resp
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok())
+                .map(|l| server_text(l, 200))
+                .filter(|l| !l.is_empty());
+            return Err(Failure::Error(match target {
+                Some(t) => format!(
+                    "The server answered HTTP {status} and redirects to {t}; Vision does not follow redirects, so check the URL"
+                ),
+                None => format!(
+                    "The server answered HTTP {status} (a redirect); Vision does not follow redirects, so check the URL"
+                ),
+            }));
+        }
         if !(200..300).contains(&status) {
             return Err(Failure::Error(format!("The server answered HTTP {status}")));
         }
@@ -595,7 +772,9 @@ impl HttpSession<'_> {
             .with_config()
             .limit(MAX_MESSAGE_BYTES as u64);
         if ct.starts_with("text/event-stream") {
-            read_sse(body.reader(), id)
+            let this: &Self = self;
+            let mut reply = |answer: &Value| this.send_answer(answer);
+            read_sse(body.reader(), id, this.deadline, this.timeout, &mut reply)
         } else {
             let text = body
                 .read_to_string()
@@ -607,6 +786,31 @@ impl HttpSession<'_> {
                 Failure::Error("The server's response did not answer the request".to_owned())
             })
         }
+    }
+
+    /// POSTs an answer to a server request (the server replies 202); failures are ignored,
+    /// the main exchange reports any real problem.
+    fn send_answer(&self, answer: &Value) {
+        let Ok(left) = self.remaining() else { return };
+        let mut req = self
+            .agent
+            .post(self.url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json, text/event-stream");
+        for (k, v) in self.headers {
+            req = req.header(k.as_str(), v.expose());
+        }
+        if let Some(s) = &self.session_id {
+            req = req.header("Mcp-Session-Id", s.as_str());
+        }
+        if let Some(p) = &self.protocol {
+            req = req.header("MCP-Protocol-Version", p.as_str());
+        }
+        let _ = req
+            .config()
+            .timeout_global(Some(left.min(Duration::from_secs(5))))
+            .build()
+            .send(answer.to_string());
     }
 
     fn close(&self) {
@@ -695,7 +899,16 @@ mod tests {
         let stream = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\"}\n\n\
                       data: {\"jsonrpc\":\"2.0\",\"id\":7,\n\
                       data: \"result\":{\"ok\":true}}\n\n";
-        let v = read_sse(stream.as_bytes(), 7).ok().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let v = read_sse(
+            stream.as_bytes(),
+            7,
+            deadline,
+            Duration::from_secs(5),
+            &mut |_| {},
+        )
+        .ok()
+        .unwrap();
         assert_eq!(v, json!({"ok": true}));
     }
 

@@ -366,3 +366,356 @@ fn malformed_profile_id_is_invalid_input() {
         .unwrap_err();
     assert_eq!(err.code, ErrorCode::InvalidInput);
 }
+
+// ---- BUG-14: name hygiene ----------------------------------------------------------------
+
+#[test]
+fn a_name_of_only_zero_width_characters_is_rejected() {
+    assert_eq!(
+        create_err(&Harness::new().core(), "\u{200b}\u{200b}"),
+        ErrorCode::InvalidInput
+    );
+}
+
+#[test]
+fn a_name_with_a_text_direction_override_is_rejected() {
+    assert_eq!(
+        create_err(&Harness::new().core(), "Work\u{202e}lanosreP"),
+        ErrorCode::InvalidInput
+    );
+}
+
+#[test]
+fn a_name_with_a_zero_width_joiner_inside_is_rejected() {
+    assert_eq!(
+        create_err(&Harness::new().core(), "Wo\u{200d}rk"),
+        ErrorCode::InvalidInput
+    );
+}
+
+#[test]
+fn a_decomposed_name_is_stored_in_nfc_form() {
+    assert_eq!(
+        create_profile(&Harness::new().core(), "Cafe\u{301}").name,
+        "Caf\u{e9}"
+    );
+}
+
+#[test]
+fn composed_and_decomposed_spellings_conflict() {
+    let core = Harness::new().core();
+    create_profile(&core, "Caf\u{e9}");
+    assert_eq!(create_err(&core, "Cafe\u{301}"), ErrorCode::Conflict);
+}
+
+#[test]
+fn a_full_width_spelling_conflicts_with_the_ascii_name() {
+    let core = Harness::new().core();
+    create_profile(&core, "Work");
+    assert_eq!(
+        create_err(&core, "\u{ff37}\u{ff4f}\u{ff52}\u{ff4b}"),
+        ErrorCode::Conflict
+    );
+}
+
+#[test]
+fn the_length_limit_counts_characters_after_normalisation() {
+    let name = "e\u{301}".repeat(40);
+    assert_eq!(
+        create_profile(&Harness::new().core(), &name)
+            .name
+            .chars()
+            .count(),
+        40
+    );
+}
+
+#[test]
+fn delete_accepts_the_name_typed_in_decomposed_form() {
+    let h = Harness::new();
+    let core = h.core();
+    let p = create_profile(&core, "Caf\u{e9}");
+    assert!(
+        core.profile_delete(ProfileDeleteArgs {
+            id: p.id,
+            confirm_name: "Cafe\u{301}".into(),
+        })
+        .is_ok()
+    );
+}
+
+#[test]
+fn a_custom_tool_name_with_a_direction_override_is_rejected() {
+    let e = Harness::new()
+        .core()
+        .custom_tool_save(vision_core::ipc::CustomToolSaveArgs {
+            tool: vision_core::ipc::CustomToolInput {
+                id: "mytool".into(),
+                name: "tool\u{202e}exe".into(),
+                description: None,
+                binary: "mytool".into(),
+                install_url: None,
+                config_var: "MYTOOL_CONFIG_DIR".into(),
+                config_kind: vision_core::ipc::ConfigEnvKind::Dir,
+                login: vec!["login".into()],
+                status: None,
+                logout: None,
+            },
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::InvalidInput);
+}
+
+// ---- BUG-10: profile lifecycle -----------------------------------------------------------
+
+fn delete(core: &Core, p: &vision_core::ipc::Profile) -> vision_core::ipc::IpcResult<()> {
+    core.profile_delete(ProfileDeleteArgs {
+        id: p.id.clone(),
+        confirm_name: p.name.clone(),
+    })
+}
+
+#[test]
+fn listing_tools_of_a_deleted_profile_is_not_found() {
+    let h = Harness::new();
+    let core = h.core();
+    let p = create_profile(&core, "Work");
+    delete(&core, &p).unwrap();
+    assert_eq!(
+        core.tools_list(vision_core::ipc::ProfileScopeArgs {
+            profile_id: p.id.clone()
+        })
+        .unwrap_err()
+        .code,
+        ErrorCode::NotFound
+    );
+}
+
+#[test]
+fn an_operation_on_a_deleted_profile_does_not_recreate_its_directory() {
+    let h = Harness::new();
+    let core = h.core();
+    let p = create_profile(&core, "Work");
+    delete(&core, &p).unwrap();
+    let _ = core.mcp_list(vision_core::ipc::ProfileScopeArgs {
+        profile_id: p.id.clone(),
+    });
+    assert!(!h.data_root().join("profiles").join(&p.id).exists());
+}
+
+#[test]
+fn deleting_twice_is_not_found() {
+    let h = Harness::new();
+    let core = h.core();
+    let p = create_profile(&core, "Work");
+    delete(&core, &p).unwrap();
+    assert_eq!(delete(&core, &p).unwrap_err().code, ErrorCode::NotFound);
+}
+
+/// Deletes the profile while a slow MCP health check of it is running.
+fn delete_during_probe() -> (Harness, vision_core::ipc::IpcResult<()>, String) {
+    let h = Harness::new();
+    let pids = h.path("pids.txt");
+    h.install_fake(
+        "fake-mcp",
+        serde_json::json!({"mcp": {"mode": "ok", "init_delay_ms": 1000, "pid_file": pids.to_str().unwrap()}}),
+    );
+    let core = h.core();
+    let p = create_profile(&core, "Work");
+    let s = core
+        .mcp_save(McpSaveArgs {
+            profile_id: p.id.clone(),
+            server: McpServerInput {
+                id: None,
+                name: "slow".into(),
+                transport: McpTransportInput::Stdio {
+                    command: "fake-mcp".into(),
+                    args: vec![],
+                    env: vec![],
+                },
+                tool_ids: vec![],
+                enabled: true,
+            },
+        })
+        .unwrap();
+    let deleted = std::thread::scope(|scope| {
+        let probing = scope.spawn(|| {
+            core.mcp_test(vision_core::ipc::McpServerArgs {
+                profile_id: p.id.clone(),
+                server_id: s.id.clone(),
+            })
+        });
+        let started = std::time::Instant::now();
+        while !pids.exists() && started.elapsed() < std::time::Duration::from_secs(10) {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let deleted = delete(&core, &p);
+        let _ = probing.join().unwrap();
+        deleted
+    });
+    (h, deleted, p.id)
+}
+
+#[test]
+fn deleting_a_profile_during_a_health_check_succeeds() {
+    let (_h, deleted, _) = delete_during_probe();
+    assert!(deleted.is_ok(), "{deleted:?}");
+}
+
+#[test]
+fn a_health_check_finishing_during_a_delete_leaves_no_directory_behind() {
+    let (h, _, pid) = delete_during_probe();
+    assert!(!h.data_root().join("profiles").join(pid).exists());
+}
+
+// ---- BUG-11 / startup cleanup: secrets never outlive their profile -----------------------
+
+fn with_secret(h: &Harness, core: &Core) -> vision_core::ipc::Profile {
+    let p = create_profile(core, "Work");
+    core.mcp_save(McpSaveArgs {
+        profile_id: p.id.clone(),
+        server: McpServerInput {
+            id: None,
+            name: "remote".into(),
+            transport: McpTransportInput::Http {
+                url: "https://mcp.example.com/mcp".into(),
+                headers: vec![KeyValueInput {
+                    key: "Authorization".into(),
+                    value: ValueInput::Secret {
+                        value: Some(SecretString::new("Bearer s3cr3t")),
+                    },
+                }],
+            },
+            tool_ids: vec![],
+            enabled: true,
+        },
+    })
+    .unwrap();
+    assert_eq!(h.secrets.accounts().len(), 1);
+    p
+}
+
+#[test]
+fn delete_removes_secrets_even_when_the_profile_database_is_corrupt() {
+    let h = Harness::new();
+    let core = h.core();
+    let p = with_secret(&h, &core);
+    drop(core);
+    let dir = h.data_root().join("profiles").join(&p.id);
+    for f in ["profile.db-wal", "profile.db-shm"] {
+        let _ = std::fs::remove_file(dir.join(f));
+    }
+    std::fs::write(dir.join("profile.db"), b"this is not a database").unwrap();
+    delete(&h.core(), &p).unwrap();
+    assert!(h.secrets.accounts().is_empty());
+}
+
+#[test]
+fn delete_succeeds_when_the_credential_store_is_unavailable() {
+    let h = Harness::new();
+    let core = h.core();
+    let p = with_secret(&h, &core);
+    h.secrets.set_unavailable(true);
+    assert!(delete(&core, &p).is_ok());
+}
+
+#[test]
+fn secrets_left_by_an_unavailable_store_are_deleted_on_the_next_start() {
+    let h = Harness::new();
+    let core = h.core();
+    let p = with_secret(&h, &core);
+    h.secrets.set_unavailable(true);
+    delete(&core, &p).unwrap();
+    drop(core);
+    h.secrets.set_unavailable(false);
+    h.core();
+    assert!(h.secrets.accounts().is_empty());
+}
+
+/// Removes the profile row behind the core's back, as a crash in the middle of a delete
+/// would.
+fn orphan(h: &Harness, p: &vision_core::ipc::Profile) {
+    let conn = Connection::open(h.data_root().join("app.db")).unwrap();
+    conn.execute("DELETE FROM profiles WHERE id = ?1", [&p.id])
+        .unwrap();
+}
+
+#[test]
+fn startup_removes_a_profile_directory_without_a_row() {
+    let h = Harness::new();
+    let core = h.core();
+    let p = with_secret(&h, &core);
+    drop(core);
+    orphan(&h, &p);
+    h.core();
+    assert!(!h.data_root().join("profiles").join(&p.id).exists());
+}
+
+#[test]
+fn startup_removes_the_secrets_of_a_profile_without_a_row() {
+    let h = Harness::new();
+    let core = h.core();
+    let p = with_secret(&h, &core);
+    drop(core);
+    orphan(&h, &p);
+    h.core();
+    assert!(h.secrets.accounts().is_empty());
+}
+
+#[test]
+fn startup_leaves_directories_that_are_not_profile_ids_alone() {
+    let h = Harness::new();
+    drop(h.core());
+    let stray = h.data_root().join("profiles").join("notes");
+    std::fs::create_dir_all(&stray).unwrap();
+    h.core();
+    assert!(stray.is_dir());
+}
+
+#[test]
+fn startup_keeps_existing_profiles_and_their_secrets() {
+    let h = Harness::new();
+    let core = h.core();
+    let p = with_secret(&h, &core);
+    drop(core);
+    h.core();
+    assert_eq!(
+        (
+            h.data_root().join("profiles").join(&p.id).is_dir(),
+            h.secrets.accounts().len()
+        ),
+        (true, 1)
+    );
+}
+
+#[test]
+fn a_secret_saved_while_the_profile_is_deleted_is_not_orphaned() {
+    let h = Harness::new();
+    let core = h.core();
+    let p = create_profile(&core, "Work");
+    std::thread::scope(|scope| {
+        let saving = scope.spawn(|| {
+            core.mcp_save(McpSaveArgs {
+                profile_id: p.id.clone(),
+                server: McpServerInput {
+                    id: None,
+                    name: "remote".into(),
+                    transport: McpTransportInput::Http {
+                        url: "https://mcp.example.com/mcp".into(),
+                        headers: vec![KeyValueInput {
+                            key: "Authorization".into(),
+                            value: ValueInput::Secret {
+                                value: Some(SecretString::new("Bearer racing")),
+                            },
+                        }],
+                    },
+                    tool_ids: vec![],
+                    enabled: true,
+                },
+            })
+        });
+        delete(&core, &p).unwrap();
+        let _ = saving.join().unwrap();
+    });
+    assert!(h.secrets.accounts().is_empty());
+}
