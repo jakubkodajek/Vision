@@ -21,6 +21,11 @@
   overflow-y: auto;
 }
 
+/* View headers line up with the centred content column at wide widths. */
+.section-view > .view-header {
+  padding-inline: max(var(--space-6), calc((100% - 1040px) / 2 + var(--space-6)));
+}
+
 .page-inner {
   display: flex;
   flex-direction: column;
@@ -1220,9 +1225,9 @@
   border-top: 1px solid var(--color-border);
 }
 
-.next-steps .link-button {
+.next-steps .overview-link {
   flex: none;
-  font-size: var(--font-size-sm);
+  margin-top: 0;
 }
 
 .later-grid {
@@ -1231,12 +1236,19 @@
   gap: var(--space-3);
 }
 
+/* Planned features: a muted, solid tile (not a dashed drop zone) with a "Planned" badge. */
 .later-item {
   display: flex;
   gap: var(--space-3);
   padding: var(--space-3);
-  border: 1px dashed var(--color-border-strong);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+}
+
+.later-badge {
+  margin-left: auto;
+  font-weight: var(--font-weight-regular);
 }
 
 .later-icon {
@@ -1247,6 +1259,7 @@
 
 .later-text {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
@@ -1297,6 +1310,10 @@
 
   .view-header {
     flex-wrap: wrap;
+  }
+
+  .section-view > .view-header {
+    padding-inline: var(--space-4);
   }
 }
 

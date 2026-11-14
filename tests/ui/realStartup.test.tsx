@@ -12,7 +12,7 @@ describe("startup", () => {
   it("shows_connecting_state_until_bootstrap_answers", () => {
     const fake = standardFake().hold("bootstrap");
     renderApp(fake);
-    expect(screen.getByRole("status")).toHaveTextContent("Connecting to core…");
+    expect(screen.getByRole("status")).toHaveTextContent("Starting Vision…");
   });
 
   it("shows_full_page_error_with_the_core_message_when_the_schema_is_too_new", async () => {
@@ -80,7 +80,7 @@ describe("first run", () => {
     renderApp(fake);
     fireEvent.click(await settled(screen.findByRole("button", { name: "Create profile" })));
     expect(screen.getByRole("textbox", { name: "Name" })).toHaveAccessibleDescription(
-      "Enter a name for the profile.",
+      "Enter a name for the profile. E.g. Work or Personal.",
     );
     expect(fake.calls("profileCreate")).toEqual([]);
   });
@@ -90,6 +90,8 @@ describe("first run", () => {
       "profileCreate",
       "conflict",
       "A profile with this name already exists",
+      false,
+      "name",
     );
     renderApp(fake);
     fireEvent.change(await settled(screen.findByRole("textbox", { name: "Name" })), {
@@ -158,7 +160,7 @@ describe("profile switcher", () => {
     fireEvent.click(await settled(screen.findByRole("button", { name: /Switch profile/ })));
     fireEvent.click(screen.getByRole("menuitemradio", { name: /Personal/ }));
     expect(await settled(screen.findByRole("heading", { level: 2, name: "Home" }))).toBeInTheDocument();
-    expect(await settled(screen.findByText("Personal · Personal profile"))).toBeInTheDocument();
+    expect(await settled(screen.findByText("Personal profile", { selector: ".view-subtitle" }))).toBeInTheDocument();
     expect(fake.calls("profileSetActive")).toEqual([{ id: "p_home" }]);
   });
 
@@ -168,7 +170,7 @@ describe("profile switcher", () => {
     fireEvent.click(await settled(screen.findByRole("button", { name: /Switch profile/ })));
     fireEvent.click(screen.getByRole("menuitemradio", { name: /Personal/ }));
     expect(await settled(screen.findByText("Could not switch the profile."))).toBeInTheDocument();
-    expect(screen.getByText("Work · Work profile")).toBeInTheDocument();
+    expect(screen.getByText("Work profile", { selector: ".view-subtitle" })).toBeInTheDocument();
   });
 
   it("offers_palette_commands_for_sections_profiles_and_the_terminal", async () => {

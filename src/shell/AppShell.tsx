@@ -24,6 +24,7 @@ import { EmptyState } from "../components/primitives";
 import { Sidebar } from "../components/Sidebar";
 import { DEMO_AGENTS, DEMO_MODELS } from "../demo/workspace";
 import type { Command } from "../lib/commands";
+import { isModalOpen } from "../components/dialogStack";
 import { hasModifier, shortcutLabel } from "../lib/platform";
 import { isBoolean, isFiniteNumber, readPreference, writePreference } from "../lib/storage";
 import type {
@@ -466,18 +467,6 @@ export function AppShell({
         },
       },
       {
-        id: "toggle-panel",
-        label: state.panelOpen ? "Hide side panel" : "Show side panel",
-        group: "Actions",
-        icon: <PanelRight width={16} height={16} />,
-        shortcut: shortcutLabel("j"),
-        disabled: !activeRun,
-        keywords: "changes diff files",
-        run: () => {
-          dispatch({ type: "panel/set", open: !state.panelOpen });
-        },
-      },
-      {
         id: "switch-profile",
         label: "Switch profile…",
         group: "Actions",
@@ -489,6 +478,21 @@ export function AppShell({
         },
       },
     );
+    // The side panel shows a run's changes: offer it only when there are runs.
+    if (runs.length > 0) {
+      list.push({
+        id: "toggle-panel",
+        label: state.panelOpen ? "Hide side panel" : "Show side panel",
+        group: "Actions",
+        icon: <PanelRight width={16} height={16} />,
+        shortcut: shortcutLabel("j"),
+        disabled: !activeRun,
+        keywords: "changes diff files",
+        run: () => {
+          dispatch({ type: "panel/set", open: !state.panelOpen });
+        },
+      });
+    }
     if (onNewProfile) {
       list.push({
         id: "new-profile",
@@ -573,6 +577,8 @@ export function AppShell({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!hasModifier(event) || event.shiftKey) return;
+      // A modal dialog (form, confirmation) owns the keyboard; the palette is not one of them.
+      if (isModalOpen()) return;
       const key = event.key.toLowerCase();
       // While the modal palette is open, only its own toggle works.
       if (state.paletteOpen && key !== "k") return;
@@ -596,6 +602,18 @@ export function AppShell({
       window.removeEventListener("keydown", onKey);
     };
   }, [activeRun, runsEnabled, state.paletteOpen, state.panelOpen]);
+
+  const titleParts = [activeRun?.title ?? SECTION_LABEL[section], profile?.name, "Vision"];
+  const documentTitle = titleParts.filter(Boolean).join(" · ");
+  useEffect(() => {
+    document.title = documentTitle;
+  }, [documentTitle]);
+  useEffect(
+    () => () => {
+      document.title = "Vision";
+    },
+    [],
+  );
 
   if (!profile) {
     return (

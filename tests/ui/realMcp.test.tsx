@@ -86,7 +86,7 @@ describe("server list", () => {
     renderApp(standardFake());
     fireEvent.click(await settled(screen.findByRole("button", { name: /Switch profile/ })));
     fireEvent.click(screen.getByRole("menuitemradio", { name: /Personal/ }));
-    await settled(screen.findByText("Personal · Personal profile"));
+    await settled(screen.findByText("Personal profile", { selector: ".view-subtitle" }));
     fireEvent.click(screen.getByRole("button", { name: "MCP servers" }));
     expect(await settled(screen.findByText("No MCP servers yet"))).toBeInTheDocument();
   });

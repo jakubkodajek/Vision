@@ -16,10 +16,21 @@ import { McpServerDialog } from "./McpServerDialog";
 type Editing = { kind: "add" } | { kind: "edit"; server: McpServerView } | null;
 
 /** MCP servers of the active profile. */
-export function McpView({ profile }: { profile: Profile }) {
+export function McpView({
+  profile,
+  request = null,
+  onRequestDone,
+}: {
+  profile: Profile;
+  /** From the command palette: the add or sync dialog stays open until it closes. */
+  request?: "add-server" | "sync" | null;
+  onRequestDone?: () => void;
+}) {
   const { state, actions } = useVision();
-  const [editing, setEditing] = useState<Editing>(null);
-  const [syncing, setSyncing] = useState(false);
+  const [editingHere, setEditing] = useState<Editing>(null);
+  const [syncingHere, setSyncing] = useState(false);
+  const editing: Editing = editingHere ?? (request === "add-server" ? { kind: "add" } : null);
+  const syncing = syncingHere || request === "sync";
   const slot = state.mcp[profile.id] ?? { kind: "loading" as const };
   const syncHintId = useId();
 
@@ -133,6 +144,7 @@ export function McpView({ profile }: { profile: Profile }) {
           server={editing.kind === "edit" ? editing.server : undefined}
           onClose={() => {
             setEditing(null);
+            onRequestDone?.();
           }}
         />
       )}
@@ -143,6 +155,7 @@ export function McpView({ profile }: { profile: Profile }) {
           servers={slot.kind === "ready" ? slot.data : []}
           onClose={() => {
             setSyncing(false);
+            onRequestDone?.();
           }}
         />
       )}

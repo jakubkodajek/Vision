@@ -10,6 +10,7 @@ import { join, resolve } from "node:path";
 import {
   IPC_COMMANDS,
   VisionIpcError,
+  appInfo,
   bootstrap,
   mcpSave,
   profileCreate,
@@ -21,6 +22,23 @@ const invokeMock = vi.mocked(invoke);
 
 beforeEach(() => {
   invokeMock.mockReset();
+});
+
+describe("app_info payload (CR-16)", () => {
+  it("returns a valid answer", async () => {
+    invokeMock.mockResolvedValue({ name: "Vision", version: "0.1.0" });
+    await expect(appInfo()).resolves.toEqual({ name: "Vision", version: "0.1.0" });
+  });
+
+  it("rejects a version longer than 64 characters", async () => {
+    invokeMock.mockResolvedValue({ name: "Vision", version: "9".repeat(65) });
+    await expect(appInfo()).rejects.toMatchObject({ code: "internal" });
+  });
+
+  it("rejects an answer of the wrong shape", async () => {
+    invokeMock.mockResolvedValue({ version: 1 });
+    await expect(appInfo()).rejects.toBeInstanceOf(VisionIpcError);
+  });
 });
 
 describe("ipc client", () => {

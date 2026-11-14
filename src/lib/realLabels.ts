@@ -22,6 +22,12 @@ export const ACCENTS: readonly { id: Accent; label: string }[] = [
   { id: "green", label: "Green" },
 ];
 
+/** The first accent no profile uses yet (the first one when all are taken). */
+export function firstUnusedAccent(profiles: readonly { accent: Accent }[]): Accent {
+  const used = new Set(profiles.map((p) => p.accent));
+  return (ACCENTS.find((a) => !used.has(a.id)) ?? ACCENTS[0] ?? { id: "iris" }).id;
+}
+
 /** "Work profile", "Personal profile", "Profile". */
 export function profileKindLabel(kind: ProfileKind): string {
   if (kind === "work") return "Work profile";

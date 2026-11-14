@@ -339,7 +339,7 @@ describe("profile isolation", () => {
     renderApp(fake);
     fireEvent.click(await settled(screen.findByRole("button", { name: /Switch profile/ })));
     fireEvent.click(screen.getByRole("menuitemradio", { name: /Personal/ }));
-    await settled(screen.findByText("Personal · Personal profile"));
+    await settled(screen.findByText("Personal profile", { selector: ".view-subtitle" }));
     fake.release("toolsList", (args) => (args as { profile_id: string }).profile_id === "p_home");
     await settled(screen.findByText("0 of 1 signed in"));
     fake.release("toolsList", (args) => (args as { profile_id: string }).profile_id === "p_work");

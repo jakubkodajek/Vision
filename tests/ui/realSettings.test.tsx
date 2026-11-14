@@ -57,7 +57,13 @@ describe("profile settings", () => {
   });
 
   it("shows_a_name_conflict_under_the_name_field", async () => {
-    const fake = standardFake().fail("profileUpdate", "conflict", "A profile with this name already exists");
+    const fake = standardFake().fail(
+      "profileUpdate",
+      "conflict",
+      "A profile with this name already exists",
+      false,
+      "name",
+    );
     await openSettings(fake);
     fireEvent.click(screen.getByRole("button", { name: "Edit Work" }));
     const dialog = screen.getByRole("dialog", { name: "Edit Work" });
@@ -75,7 +81,7 @@ describe("delete profile", () => {
     await openSettings(standardFake());
     fireEvent.click(screen.getByRole("button", { name: "Delete Personal" }));
     const dialog = screen.getByRole("alertdialog", { name: "Delete Personal?" });
-    fireEvent.change(within(dialog).getByLabelText("Type Personal to confirm"), {
+    fireEvent.change(within(dialog).getByLabelText("Type “Personal” to confirm"), {
       target: { value: "personal" },
     });
     expect(within(dialog).getByRole("button", { name: "Delete profile" })).toBeDisabled();
@@ -85,7 +91,7 @@ describe("delete profile", () => {
     await openSettings(standardFake());
     fireEvent.click(screen.getByRole("button", { name: "Delete Personal" }));
     const dialog = screen.getByRole("alertdialog", { name: "Delete Personal?" });
-    fireEvent.change(within(dialog).getByLabelText("Type Personal to confirm"), {
+    fireEvent.change(within(dialog).getByLabelText("Type “Personal” to confirm"), {
       target: { value: "Personal" },
     });
     expect(within(dialog).getByRole("button", { name: "Delete profile" })).toBeEnabled();
@@ -96,7 +102,7 @@ describe("delete profile", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete Personal" }));
     const dialog = screen.getByRole("alertdialog", { name: "Delete Personal?" });
     expect(dialog).toHaveAccessibleDescription(/tool sign-ins .* MCP servers with their secret values/);
-    expect(within(dialog).getByText(/Sign out of each tool in Tools first/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Switch to this profile and sign out of each tool in Tools first/)).toBeInTheDocument();
   });
 
   it("lists_the_tools_still_signed_in", async () => {
@@ -114,7 +120,7 @@ describe("delete profile", () => {
     await openSettings(fake);
     fireEvent.click(screen.getByRole("button", { name: "Delete Personal" }));
     const dialog = screen.getByRole("alertdialog", { name: "Delete Personal?" });
-    fireEvent.change(within(dialog).getByLabelText("Type Personal to confirm"), {
+    fireEvent.change(within(dialog).getByLabelText("Type “Personal” to confirm"), {
       target: { value: "Personal" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete profile" }));
@@ -128,7 +134,7 @@ describe("delete profile", () => {
     await openSettings(fake);
     fireEvent.click(screen.getByRole("button", { name: "Delete Personal" }));
     const dialog = screen.getByRole("alertdialog", { name: "Delete Personal?" });
-    fireEvent.change(within(dialog).getByLabelText("Type Personal to confirm"), {
+    fireEvent.change(within(dialog).getByLabelText("Type “Personal” to confirm"), {
       target: { value: "Personal" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete profile" }));
@@ -140,7 +146,7 @@ describe("delete profile", () => {
     await openSettings(onlyWork());
     fireEvent.click(screen.getByRole("button", { name: "Delete Work" }));
     const dialog = screen.getByRole("alertdialog", { name: "Delete Work?" });
-    fireEvent.change(within(dialog).getByLabelText("Type Work to confirm"), { target: { value: "Work" } });
+    fireEvent.change(within(dialog).getByLabelText("Type “Work” to confirm"), { target: { value: "Work" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete profile" }));
     expect(
       await settled(screen.findByRole("heading", { name: "Create your first profile" })),

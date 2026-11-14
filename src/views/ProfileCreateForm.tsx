@@ -1,9 +1,10 @@
-import { useId, useState, type SyntheticEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useId, useState, type SyntheticEvent, type ReactNode, type RefObject } from "react";
 import { Button, ErrorState } from "../components/primitives";
 import { useVision } from "../data/context";
 import { errorText } from "../data/errors";
 import { useAsyncAction } from "../data/useAsyncAction";
-import type { Profile } from "../ipc/bindings";
+import type { Accent, Profile } from "../ipc/bindings";
+import { firstUnusedAccent } from "../lib/realLabels";
 import { profileNameError } from "../lib/validation";
 import { ProfileFields, type ProfileDraft } from "./ProfileFields";
 
@@ -17,6 +18,7 @@ export function ProfileCreateForm({
   secondary,
   nameRef,
   defaultKind = "work",
+  onAccentChange,
 }: {
   /** Called while the form is still shown; the first profile replaces the welcome screen itself. */
   onCreated?: (profile: Profile) => void;
@@ -25,24 +27,24 @@ export function ProfileCreateForm({
   secondary?: ReactNode;
   nameRef?: RefObject<HTMLInputElement | null>;
   defaultKind?: ProfileDraft["kind"];
+  /** Told the chosen accent, so the page around the form can preview it. */
+  onAccentChange?: (accent: Accent) => void;
 }) {
   const { state, actions } = useVision();
   const idPrefix = useId();
-  const [draft, setDraft] = useState<ProfileDraft>({
+  const [draft, setDraft] = useState<ProfileDraft>(() => ({
     name: "",
     kind: defaultKind,
-    accent: "iris",
-  });
+    accent: firstUnusedAccent(state.profiles),
+  }));
   const [nameError, setNameError] = useState<string | null>(null);
   const create = useAsyncAction(actions.createProfile);
-  const coreFieldError =
-    create.error && (create.error.code === "invalid_input" || create.error.code === "conflict")
-      ? create.error.message
-      : null;
+  const coreFieldError = create.error?.field === "name" ? create.error.message : null;
   const formError = create.error && !coreFieldError ? create.error : null;
 
   const submit = async (event: SyntheticEvent) => {
     event.preventDefault();
+    if (create.busy) return;
     const local = profileNameError(draft.name);
     setNameError(local);
     if (local) {
@@ -57,6 +59,11 @@ export function ProfileCreateForm({
     if (result.ok) onCreated?.(result.value);
   };
 
+  // A core error about the name: focus the field once it shows the message.
+  useEffect(() => {
+    if (create.error?.field === "name") nameRef?.current?.focus();
+  }, [create.error, nameRef]);
+
   return (
     <form className="profile-form" onSubmit={(e) => void submit(e)} noValidate>
       <ProfileFields
@@ -67,6 +74,7 @@ export function ProfileCreateForm({
         nameError={nameError ?? coreFieldError}
         onChange={(next) => {
           setDraft(next);
+          if (next.accent !== draft.accent) onAccentChange?.(next.accent);
           if (nameError) setNameError(null);
           if (create.error) create.reset();
         }}

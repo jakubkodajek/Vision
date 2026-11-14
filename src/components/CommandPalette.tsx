@@ -118,7 +118,7 @@ function PaletteDialog({ commands, onClose }: Omit<CommandPaletteProps, "open">)
             aria-autocomplete="list"
             aria-activedescendant={active ? `${baseId}-${active.id}` : undefined}
             aria-label="Search commands"
-            placeholder="Search commands, runs and settings…"
+            placeholder="Search commands and settings…"
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);

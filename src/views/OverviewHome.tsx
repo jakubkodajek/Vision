@@ -30,6 +30,12 @@ const LATER: { title: string; icon: ReactNode; text: string }[] = [
   },
 ];
 
+/** "Work profile" when the name is the kind, else "Side project · Work profile". */
+function homeSubtitle(profile: Profile): string {
+  const kind = profileKindLabel(profile.kind);
+  return kind.toLowerCase() === `${profile.name.trim().toLowerCase()} profile` ? kind : `${profile.name} · ${kind}`;
+}
+
 /** Home: what is set up in the active profile and what to do next. */
 export function OverviewHome({
   profile,
@@ -99,10 +105,10 @@ export function OverviewHome({
     <div className="section-view">
       <header className="view-header">
         <div className="view-header-main">
-          <h2 className="view-title">Home</h2>
-          <p className="view-subtitle">
-            {profile.name} · {profileKindLabel(profile.kind)}
-          </p>
+          <h2 className="view-title" tabIndex={-1} data-focus-fallback>
+            Home
+          </h2>
+          <p className="view-subtitle">{homeSubtitle(profile)}</p>
         </div>
       </header>
       <div className="page-scroll">
@@ -129,7 +135,7 @@ export function OverviewHome({
                   <p className="overview-figure">
                     {String(signedIn.length)} of {String(toolEntries.length)} signed in
                   </p>
-                  <p className="overview-detail is-truncated">
+                  <p className="overview-detail is-wrap">
                     {signedIn.length > 0
                       ? signedIn.map((e) => e.view.spec.name).join(", ")
                       : "No tool is signed in yet."}
@@ -208,12 +214,13 @@ export function OverviewHome({
                     <span>{step.text}</span>
                     <button
                       type="button"
-                      className="link-button"
+                      className="overview-link"
                       onClick={() => {
                         onNavigate(step.section);
                       }}
                     >
                       {step.action}
+                      <ArrowRight width={14} height={14} aria-hidden="true" />
                     </button>
                   </li>
                 ))}
@@ -229,7 +236,10 @@ export function OverviewHome({
                 <li key={item.title} className="later-item">
                   <span className="later-icon">{item.icon}</span>
                   <span className="later-text">
-                    <span className="later-title">{item.title}</span>
+                    <span className="later-title">
+                      {item.title}
+                      <span className="badge badge-neutral later-badge">Planned</span>
+                    </span>
                     <span className="later-description">{item.text}</span>
                   </span>
                 </li>

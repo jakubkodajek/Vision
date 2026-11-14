@@ -1,4 +1,4 @@
-import { SquareTerminal, X } from "lucide-react";
+import { Plug, Plus, RefreshCw, Settings2, SquareTerminal, UploadCloud, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Dialog } from "../components/Dialog";
 import { Button, Spinner } from "../components/primitives";
@@ -17,27 +17,40 @@ import { ProfilesSettings } from "../views/ProfilesSettings";
 import { StartupError, StartupLoading, WelcomeView } from "../views/StartupViews";
 import { ToolsView } from "../views/ToolsView";
 
+/** A dialog a palette command asked a view to open. */
+type ViewRequest = "add-tool" | "add-server" | "sync";
+
 type CoreInfo = { kind: "pending" } | { kind: "ready"; info: AppInfo } | { kind: "error" };
 
+const CORE_TEXT = {
+  pending: "Starting Vision…",
+  error: "Could not reach the Vision core.",
+} as const;
+
+/**
+ * Version line at the foot of the sidebar. In the collapsed rail only the dot shows; its
+ * text stays available to screen readers and as a tooltip.
+ */
 function CoreStatus({ status }: { status: CoreInfo }) {
+  const text = status.kind === "ready" ? `Vision ${status.info.version}` : CORE_TEXT[status.kind];
   return (
     <div className="core-status">
       {status.kind === "pending" && (
-        <p className="core-status-line" role="status">
+        <p className="core-status-line" role="status" title={text}>
           <Spinner size={12} />
-          <span>Connecting to core...</span>
+          <span>{text}</span>
         </p>
       )}
       {status.kind === "ready" && (
-        <p className="core-status-line">
+        <p className="core-status-line" title={text}>
           <span className="core-dot is-ok" aria-hidden="true" />
-          <span>Core {status.info.version}</span>
+          <span>{text}</span>
         </p>
       )}
       {status.kind === "error" && (
-        <p className="core-status-line is-error" role="alert">
+        <p className="core-status-line is-error" role="alert" title={text}>
           <span className="core-dot is-error" aria-hidden="true" />
-          <span>Could not reach the Vision core.</span>
+          <span>{text}</span>
         </p>
       )}
     </div>
@@ -178,6 +191,16 @@ export function VisionApp() {
     [state.profiles],
   );
 
+  // A palette command that opens a dialog in a view: the view consumes the request.
+  const [request, setRequest] = useState<ViewRequest | null>(null);
+  const ask = useCallback((kind: ViewRequest, target: Section) => {
+    setSection(target);
+    setRequest(kind);
+  }, []);
+  const consumeRequest = useCallback(() => {
+    setRequest(null);
+  }, []);
+
   const commands = useMemo<Command[]>(
     () => [
       {
@@ -188,8 +211,59 @@ export function VisionApp() {
         keywords: "shell console sign in",
         run: openTerminal,
       },
+      {
+        id: "check-all-tools",
+        label: "Check all tools",
+        group: "Actions",
+        icon: <RefreshCw width={16} height={16} />,
+        keywords: "status sign in refresh",
+        run: () => {
+          setSection("tools");
+          if (activeId) actions.checkAllTools(activeId);
+        },
+      },
+      {
+        id: "add-custom-tool",
+        label: "Add custom tool…",
+        group: "Actions",
+        icon: <Plus width={16} height={16} />,
+        keywords: "tool cli new",
+        run: () => {
+          ask("add-tool", "tools");
+        },
+      },
+      {
+        id: "add-mcp-server",
+        label: "Add MCP server…",
+        group: "Actions",
+        icon: <Plug width={16} height={16} />,
+        keywords: "mcp server new",
+        run: () => {
+          ask("add-server", "mcp");
+        },
+      },
+      {
+        id: "sync-claude",
+        label: "Sync to Claude Code…",
+        group: "Actions",
+        icon: <UploadCloud width={16} height={16} />,
+        keywords: "mcp claude sync",
+        run: () => {
+          ask("sync", "mcp");
+        },
+      },
+      {
+        id: "manage-profiles",
+        label: "Manage profiles",
+        group: "Actions",
+        icon: <Settings2 width={16} height={16} />,
+        keywords: "profile account delete rename",
+        run: () => {
+          setSection("settings");
+        },
+      },
     ],
-    [openTerminal],
+    [actions, activeId, ask, openTerminal],
   );
 
   const openNewProfile = useCallback(() => {
@@ -216,9 +290,23 @@ export function VisionApp() {
       case "home":
         return <OverviewHome profile={active} onNavigate={setSection} />;
       case "tools":
-        return <ToolsView key={active.id} profile={active} />;
+        return (
+          <ToolsView
+            key={active.id}
+            profile={active}
+            request={request === "add-tool" ? request : null}
+            onRequestDone={consumeRequest}
+          />
+        );
       case "mcp":
-        return <McpView key={active.id} profile={active} />;
+        return (
+          <McpView
+            key={active.id}
+            profile={active}
+            request={request === "add-server" || request === "sync" ? request : null}
+            onRequestDone={consumeRequest}
+          />
+        );
       default:
         return undefined;
     }
@@ -234,7 +322,10 @@ export function VisionApp() {
         onNewProfile={openNewProfile}
         onManageProfiles={manageProfiles}
         section={section}
-        onNavigate={setSection}
+        onNavigate={(next) => {
+          setRequest(null);
+          setSection(next);
+        }}
         renderSection={renderSection}
         settingsTop={<ProfilesSettings onNewProfile={openNewProfile} />}
         extraCommands={commands}

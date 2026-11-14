@@ -18,6 +18,8 @@ export interface ConfirmDialogProps {
   /** Extra content between description and buttons, e.g. a typed confirmation. */
   children?: ReactNode;
   confirmDisabled?: boolean;
+  /** Called when the form is submitted (Enter) while the confirm button is disabled. */
+  onBlockedSubmit?: () => void;
   destructive?: boolean;
   platform?: Platform | null;
   errorTitle?: string;
@@ -33,6 +35,7 @@ export function ConfirmDialog({
   onDone,
   children,
   confirmDisabled = false,
+  onBlockedSubmit,
   destructive = true,
   platform = null,
   errorTitle = "That did not work",
@@ -41,7 +44,10 @@ export function ConfirmDialog({
   const cancelRef = useRef<HTMLButtonElement>(null);
   const submit = async (event: SyntheticEvent) => {
     event.preventDefault();
-    if (confirmDisabled) return;
+    if (confirmDisabled) {
+      onBlockedSubmit?.();
+      return;
+    }
     const result = await action.run();
     if (result.ok) {
       onDone?.();
@@ -68,7 +74,7 @@ export function ConfirmDialog({
           </div>
         )}
         <div className="dialog-footer">
-          <Button ref={cancelRef} variant="secondary" onClick={onClose} disabled={action.busy}>
+          <Button ref={cancelRef} variant="secondary" onClick={onClose} inactive={action.busy}>
             Cancel
           </Button>
           <Button

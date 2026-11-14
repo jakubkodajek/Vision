@@ -34,9 +34,19 @@ const ACTION_TITLE: Record<"check" | "sign_in" | "sign_out" | "install", string>
 };
 
 /** Tools of the active profile: one card per tool, sign-in and sign-out in the terminal. */
-export function ToolsView({ profile }: { profile: Profile }) {
+export function ToolsView({
+  profile,
+  request = null,
+  onRequestDone,
+}: {
+  profile: Profile;
+  /** "add-tool" from the command palette keeps the add dialog open until it closes. */
+  request?: "add-tool" | null;
+  onRequestDone?: () => void;
+}) {
   const { state, actions } = useVision();
-  const [adding, setAdding] = useState(false);
+  const [addingHere, setAdding] = useState(false);
+  const adding = addingHere || request === "add-tool";
   const slot = state.tools[profile.id];
   const terminal = useAsyncAction(actions.openProfileTerminal);
 
@@ -147,6 +157,7 @@ export function ToolsView({ profile }: { profile: Profile }) {
         <CustomToolDialog
           onClose={() => {
             setAdding(false);
+            onRequestDone?.();
           }}
         />
       )}

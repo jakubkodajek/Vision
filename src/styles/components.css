@@ -367,6 +367,19 @@
 .profile-name {
   font-weight: var(--font-weight-semibold);
   font-size: var(--font-size-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-item-text {
+  min-width: 0;
+}
+
+.menu-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .profile-account {
@@ -421,9 +434,15 @@
   right: 0;
 }
 
+/* The collapsed rail clips its content: open the menu beside it, fixed to the viewport. */
 .profile-switcher.is-collapsed .profile-menu {
+  position: fixed;
+  top: var(--menu-top, var(--space-2));
+  left: var(--menu-left, 64px);
   right: auto;
-  left: 0;
+  width: max-content;
+  min-width: 240px;
+  max-width: min(320px, calc(100vw - var(--menu-left, 64px) - var(--space-2)));
 }
 
 .menu-item {

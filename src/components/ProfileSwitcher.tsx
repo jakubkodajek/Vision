@@ -2,6 +2,7 @@ import { Check, ChevronsUpDown, Plus, Settings2 } from "lucide-react";
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent,
@@ -25,12 +26,14 @@ export interface ProfileSwitcherProps {
   collapsed?: boolean;
 }
 
+/** Up to two initials from the first letter or digit of each word ("(Old) side" is "OS"). */
 function initials(name: string): string {
   return name
     .split(/\s+/)
-    .filter(Boolean)
+    .map((word) => /[\p{L}\p{N}]/u.exec(word)?.[0])
+    .filter((ch): ch is string => ch !== undefined)
     .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
+    .map((ch) => ch.toUpperCase())
     .join("");
 }
 
@@ -87,7 +90,7 @@ export function ProfileSwitcher({
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         aria-label={collapsed ? `${active.name} profile, switch profile` : undefined}
-        title={collapsed ? `Profile: ${active.name}` : undefined}
+        title={collapsed ? `Profile: ${active.name}` : active.name}
         onClick={() => {
           setInitialFocus("current");
           onOpenChange(!open);
@@ -113,6 +116,7 @@ export function ProfileSwitcher({
           activeId={active.id}
           initialFocus={initialFocus}
           buttonRef={buttonRef}
+          collapsed={collapsed}
           onSelect={(id) => {
             onSwitch(id);
             close(true);
@@ -159,6 +163,7 @@ function ProfileMenu({
   activeId,
   initialFocus,
   buttonRef,
+  collapsed,
   onSelect,
   actions,
   onClose,
@@ -168,6 +173,8 @@ function ProfileMenu({
   activeId: string;
   initialFocus: "current" | "last";
   buttonRef: RefObject<HTMLButtonElement | null>;
+  /** In the collapsed rail the menu opens beside it, outside the rail's clipping. */
+  collapsed: boolean;
   onSelect: (id: string) => void;
   actions: readonly MenuAction[];
   onClose: (restoreFocus: boolean) => void;
@@ -187,6 +194,28 @@ function ProfileMenu({
   useEffect(() => {
     itemRefs.current[focusIndex]?.focus();
   }, [focusIndex]);
+
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    const button = buttonRef.current;
+    if (!collapsed || !menu || !button) return;
+    const rect = button.getBoundingClientRect();
+    menu.style.setProperty("--menu-top", `${String(rect.top)}px`);
+    menu.style.setProperty("--menu-left", `${String(rect.right + 8)}px`);
+  }, [buttonRef, collapsed]);
+
+  const labels = [...profiles.map((p) => p.name), ...actions.map((a) => a.label)];
+  /** First-letter typeahead: the next item whose label starts with `char`. */
+  const typeahead = (char: string) => {
+    const needle = char.toLocaleLowerCase();
+    for (let step = 1; step <= itemCount; step += 1) {
+      const index = (focusIndex + step) % itemCount;
+      if (labels[index]?.trim().toLocaleLowerCase().startsWith(needle)) {
+        setFocusIndex(index);
+        return;
+      }
+    }
+  };
 
   useEffect(() => {
     const onPointer = (event: PointerEvent) => {
@@ -225,6 +254,11 @@ function ProfileMenu({
       case "Tab":
         onClose(false);
         break;
+      default:
+        if (event.key.length === 1 && event.key !== " " && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          event.preventDefault();
+          typeahead(event.key);
+        }
     }
   };
 
@@ -261,7 +295,9 @@ function ProfileMenu({
           >
             <ProfileAvatar profile={profile} size="sm" />
             <span className="menu-item-text">
-              <span>{profile.name}</span>
+              <span className="menu-item-label" title={profile.name}>
+                {profile.name}
+              </span>
               <span className="menu-item-hint">{profile.account}</span>
             </span>
             {checked && <Check className="menu-item-check" width={14} height={14} aria-hidden="true" />}
@@ -273,7 +309,8 @@ function ProfileMenu({
         const index = profiles.length + offset;
         const activate = action.run
           ? () => {
-              onClose(false);
+              // Focus goes back to the menu button, so a dialog the action opens returns it there.
+              onClose(true);
               action.run?.();
             }
           : undefined;

@@ -1,6 +1,7 @@
 import { Check } from "lucide-react";
 import type { Ref } from "react";
 import { TextField } from "../components/forms";
+import { LIMITS } from "../lib/validation";
 import type { Accent, ProfileKind } from "../ipc/bindings";
 import { cx } from "../lib/cx";
 import { ACCENTS, PROFILE_KINDS } from "../lib/realLabels";
@@ -12,7 +13,11 @@ export interface ProfileDraft {
   accent: Accent;
 }
 
-/** Name, kind and accent inputs shared by Welcome, New profile and Edit profile. */
+/**
+ * Name, kind and accent inputs shared by Welcome, New profile and Edit profile. While
+ * `disabled` (a request runs) the inputs ignore changes but stay focusable, so focus never
+ * drops out of a dialog.
+ */
 export function ProfileFields({
   value,
   onChange,
@@ -35,16 +40,16 @@ export function ProfileFields({
         label="Name"
         value={value.name}
         inputRef={nameRef}
-        maxLength={60}
+        maxLength={LIMITS.profileName}
         autoComplete="off"
-        placeholder="For example Work or Personal"
-        disabled={disabled}
+        hint="E.g. Work or Personal."
+        readOnly={disabled}
         error={nameError}
         onChange={(event) => {
-          onChange({ ...value, name: event.target.value });
+          if (!disabled) onChange({ ...value, name: event.target.value });
         }}
       />
-      <fieldset className="segmented field" disabled={disabled}>
+      <fieldset className="segmented field" aria-disabled={disabled || undefined}>
         <legend className="field-label">Kind</legend>
         <div className="segmented-options">
           {PROFILE_KINDS.map((option) => (
@@ -58,16 +63,17 @@ export function ProfileFields({
                 value={option.id}
                 checked={value.kind === option.id}
                 onChange={() => {
-                  onChange({ ...value, kind: option.id });
+                  if (!disabled) onChange({ ...value, kind: option.id });
                 }}
               />
+              {value.kind === option.id && <Check width={14} height={14} aria-hidden="true" />}
               <span>{option.label}</span>
             </label>
           ))}
         </div>
       </fieldset>
-      <fieldset className="accent-picker field" disabled={disabled}>
-        <legend className="field-label">Colour</legend>
+      <fieldset className="accent-picker field" aria-disabled={disabled || undefined}>
+        <legend className="field-label">Color</legend>
         <div className="accent-options">
           {ACCENTS.map((option) => {
             const selected = value.accent === option.id;
@@ -83,7 +89,7 @@ export function ProfileFields({
                   value={option.id}
                   checked={selected}
                   onChange={() => {
-                    onChange({ ...value, accent: option.id });
+                    if (!disabled) onChange({ ...value, accent: option.id });
                   }}
                 />
                 <span className="accent-swatch" data-accent={option.id} aria-hidden="true">

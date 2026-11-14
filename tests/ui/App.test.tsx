@@ -39,13 +39,13 @@ describe("App", () => {
   it("shows_pending_state_before_the_command_resolves", () => {
     invokeMock.mockReturnValue(new Promise(() => undefined));
     render(<App />);
-    expect(screen.getByText(/Connecting to core/)).toBeInTheDocument();
+    expect(screen.getByText(/Starting Vision…/)).toBeInTheDocument();
   });
 
   it("shows_core_version_from_app_info_command", async () => {
     invokeMock.mockImplementation(coreWithOneProfile);
     render(<App />);
-    expect(await screen.findByText("Core 0.1.0")).toBeInTheDocument();
+    expect(await screen.findByText("Vision 0.1.0")).toBeInTheDocument();
     expect(invokeMock).toHaveBeenCalledWith("app_info", undefined);
   });
 

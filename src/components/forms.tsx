@@ -47,7 +47,8 @@ export function FieldError({ id, children }: { id: string; children: ReactNode }
 }
 
 interface FieldChrome {
-  label: string;
+  /** Visible label; may hold markup such as a `<strong>` name. */
+  label: ReactNode;
   /** Help text under the control. */
   hint?: ReactNode;
   error?: string | null;
@@ -61,7 +62,7 @@ function describedBy(...ids: (string | false | null | undefined)[]): string | un
   return list.length > 0 ? list : undefined;
 }
 
-function Label({ htmlFor, label, optional }: { htmlFor: string; label: string; optional?: boolean }) {
+function Label({ htmlFor, label, optional }: { htmlFor: string; label: ReactNode; optional?: boolean }) {
   return (
     <label htmlFor={htmlFor} className="field-label">
       {label}
