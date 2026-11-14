@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "files": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"],
+      "env": {
+        "CLOUDSDK_CONFIG": "/vision/profiles/p_abcdefghijkl/tools/gcloud",
+        "API_KEY": "value-1"
+      }
+    }
+  }
+}

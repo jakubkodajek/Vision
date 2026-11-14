@@ -1,0 +1,6 @@
+      Name                    Value             Type    Location
+      ----                    -----             ----    --------
+   profile                <not set>             None    None
+access_key     ****************ABCD shared-credentials-file
+secret_key     ****************WXYZ shared-credentials-file
+    region                us-east-1      config-file    ~/.aws/config
