@@ -8,7 +8,8 @@
  * custom tool or stdio server is declined: `not_approved`), `?mock=invalid-tool` (a stored
  * custom tool that no longer validates), `?mock=unapproved-tool` (a custom tool never
  * approved), `?mock=fail-<command>` (that command fails, e.g. `fail-toolSignIn`,
- * `fail-mcpSave`), `?mock=no-core-info` (`app_info` fails). Default: two profiles with mixed
+ * `fail-mcpSave`), `?mock=no-core-info` (`app_info` fails), `?mock=boot-io` (startup fails
+ * with `io`), `?mock=delete-leaves-files` (a deleted profile leaves files: `io` after removal). Default: two profiles with mixed
  * states; syncing skips servers with secret values.
  */
 import type { VisionClient } from "../data/client";
@@ -433,6 +434,7 @@ export function createDevMockClient(): VisionClient {
     appOpenReleasesPage: () => wait(() => null, 100, "appOpenReleasesPage"),
     bootstrap: () =>
       wait(() => {
+        if (on.has("boot-io")) fail("io", "The profile database is locked by another process");
         if (on.has("error"))
           fail(
             "schema_too_new",
@@ -483,6 +485,9 @@ export function createDevMockClient(): VisionClient {
         state.profiles = state.profiles.filter((x) => x.id !== p.id);
         state.data.delete(p.id);
         if (state.active === p.id) state.active = state.profiles[0]?.id ?? null;
+        // `?mock=delete-leaves-files`: the row is gone but the folder could not be removed.
+        if (on.has("delete-leaves-files"))
+          fail("io", "Some files in the profile folder could not be deleted: permission denied");
         return null;
       }, latency, "profileDelete"),
     profileSetActive: (args) =>
