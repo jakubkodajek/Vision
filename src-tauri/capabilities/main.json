@@ -1,7 +1,30 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Main window: only the app_info command",
-  "windows": ["main"],
-  "permissions": ["allow-app-info"]
+  "description": "Main window: exactly the IPC commands of docs/specs/real-app-foundation.md section 2.6",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "allow-app-info",
+    "allow-bootstrap",
+    "allow-profile-create",
+    "allow-profile-update",
+    "allow-profile-delete",
+    "allow-profile-set-active",
+    "allow-profile-open-terminal",
+    "allow-tools-list",
+    "allow-tool-check",
+    "allow-tool-sign-in",
+    "allow-tool-sign-out",
+    "allow-tool-open-install-page",
+    "allow-custom-tool-save",
+    "allow-custom-tool-delete",
+    "allow-mcp-list",
+    "allow-mcp-save",
+    "allow-mcp-delete",
+    "allow-mcp-test",
+    "allow-mcp-sync-claude",
+    "allow-mcp-authorize"
+  ]
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-mcp-delete"
+description = "Enables the mcp_delete command without any pre-configured scope."
+commands.allow = ["mcp_delete"]
+
+[[permission]]
+identifier = "deny-mcp-delete"
+description = "Denies the mcp_delete command without any pre-configured scope."
+commands.deny = ["mcp_delete"]
