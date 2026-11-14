@@ -15,3 +15,4 @@ Format: `- YYYY-MM-DD: <decision> - <reason> [ADR-NNNN]`
 - 2026-11-13: No written confirmation requested from Anthropic/OpenAI; owner accepts terms risk R2 based on published terms (docs/PLAN.md D12)
 - 2026-11-13: SQLite per profile plus a small app database; no server database - local-only data, profile isolation (docs/adr/0003-sqlite-per-profile.md)
 - 2026-11-13: Sign in through the official CLIs on the user's subscription; Vision stores no AI or GitHub tokens (docs/adr/0004-official-clis-subscription-sign-in.md)
+- 2026-11-14: Bundle identifier io.github.jakubkodajek.vision (default; changeable until F-003 creates app data under it) - owner did not pick one

@@ -49,4 +49,4 @@ Template:
   - `no-unnecessary-type-parameters` disabled for tests/config (CR-4a, optional inline disable with reason).
   - README.md rewrite for the Vision project -> docs pass after F-002.
 - Blockers / open questions:
-  - Owner must decide the bundle identifier before F-003 (`dev.vision.desktop` is a placeholder).
+  - Bundle identifier set to `io.github.jakubkodajek.vision` (default chosen 2026-11-14; owner may still change it, but only before F-003 creates app data paths).
