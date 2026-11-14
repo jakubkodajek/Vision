@@ -42,7 +42,8 @@ export function HomeView({
           {greeting()}. <span className="home-title-muted">What should we build?</span>
         </h2>
         <Composer
-          key={`${profile.id}-${String(focusKey)}`}
+          key={profile.id}
+          focusSignal={focusKey}
           variant="hero"
           onSubmit={onStart}
           agents={agents}

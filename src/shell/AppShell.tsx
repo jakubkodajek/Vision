@@ -14,7 +14,7 @@ import {
   Sun,
   UserRound,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useReducer, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { CommandPalette } from "../components/CommandPalette";
 import type { ComposerSubmission, PickerOption } from "../components/Composer";
 import { Panel } from "../components/Panel";
@@ -108,6 +108,12 @@ function initialState(profiles: readonly Profile[]): ShellState {
   };
 }
 
+/** Run title from the prompt, cut by code points so emoji are never split. */
+function titleFrom(text: string): string {
+  const chars = Array.from(text);
+  return chars.length > 60 ? `${chars.slice(0, 57).join("").trimEnd()}…` : text;
+}
+
 let idCounter = 0;
 function nextId(prefix: string): string {
   idCounter += 1;
@@ -161,10 +167,18 @@ export function AppShell({
     timers.current.add(t);
   }, []);
 
+  const inFlight = useRef(new Set<string>());
+  const [deciding, setDeciding] = useState<ReadonlySet<string>>(new Set());
   const load = useCallback(
     (profileId: string) => {
+      // StrictMode runs mount effects twice; never start a second load for the same profile.
+      if (inFlight.current.has(profileId)) return;
+      inFlight.current.add(profileId);
       dispatch({ type: "workspace/loading", profileId });
       loadWorkspace(profileId)
+        .finally(() => {
+          inFlight.current.delete(profileId);
+        })
         .then((data) => {
           if (mounted.current) dispatch({ type: "workspace/loaded", profileId, data });
         })
@@ -190,6 +204,9 @@ export function AppShell({
     if (state.theme === "system") delete root.dataset.theme;
     else root.dataset.theme = state.theme;
     writePreference("theme", state.theme);
+    return () => {
+      delete root.dataset.theme;
+    };
   }, [state.theme]);
 
   useEffect(() => {
@@ -203,7 +220,13 @@ export function AppShell({
   useEffect(() => {
     // CSSOM is allowed by the production CSP (style-src 'self'); inline style attributes are not needed.
     shellRef.current?.style.setProperty("--panel-width", `${String(state.panelWidth)}px`);
-    writePreference("panelWidth", state.panelWidth);
+    // Persist once the drag settles instead of on every pixel.
+    const t = setTimeout(() => {
+      writePreference("panelWidth", state.panelWidth);
+    }, 250);
+    return () => {
+      clearTimeout(t);
+    };
   }, [state.panelWidth]);
 
   // --- run interactions (preview only) -------------------------------------
@@ -257,11 +280,11 @@ export function AppShell({
   );
 
   const startTask = useCallback(
-    async ({ text, agent, model, projectId }: ComposerSubmission) => {
+    ({ text, agent, model, projectId }: ComposerSubmission) => {
       const profileId = state.profileId;
       const run: Run = {
         id: nextId("run"),
-        title: text.length > 60 ? `${text.slice(0, 57).trimEnd()}…` : text,
+        title: titleFrom(text),
         projectId,
         agent,
         model,
@@ -290,7 +313,7 @@ export function AppShell({
   );
 
   const sendInRun = useCallback(
-    async ({ text }: ComposerSubmission) => {
+    ({ text }: ComposerSubmission) => {
       if (!activeRun) return Promise.resolve();
       const profileId = state.profileId;
       dispatch({
@@ -318,12 +341,18 @@ export function AppShell({
     (eventId: string, decision: ApprovalDecision) => {
       const profileId = state.profileId;
       const runId = state.activeRunId;
+      if (!runId) return Promise.resolve();
+      const key = `${profileId}/${runId}/${eventId}`;
+      // One decision per approval, even if the card remounted while the first is in flight.
+      if (deciding.has(key)) return Promise.resolve();
+      setDeciding((prev) => new Set(prev).add(key));
       return new Promise<void>((resolve) => {
         later(() => {
-          if (!runId) {
-            resolve();
-            return;
-          }
+          setDeciding((prev) => {
+            const next = new Set(prev);
+            next.delete(key);
+            return next;
+          });
           dispatch({
             type: "run/updateEvent",
             profileId,
@@ -337,7 +366,7 @@ export function AppShell({
         }, decisionDelayMs);
       });
     },
-    [decisionDelayMs, later, state.activeRunId, state.profileId, streamReply],
+    [deciding, decisionDelayMs, later, state.activeRunId, state.profileId, streamReply],
   );
 
   // --- commands & shortcuts ------------------------------------------------
@@ -453,6 +482,8 @@ export function AppShell({
     const onKey = (event: KeyboardEvent) => {
       if (!hasModifier(event) || event.shiftKey) return;
       const key = event.key.toLowerCase();
+      // While the modal palette is open, only its own toggle works.
+      if (state.paletteOpen && key !== "k") return;
       if (key === "k") {
         event.preventDefault();
         dispatch({ type: "palette/set", open: !state.paletteOpen });
@@ -502,6 +533,13 @@ export function AppShell({
           dispatch({ type: "panel/set", open: !state.panelOpen });
         }}
         onDecide={decide}
+        decidingIds={
+          new Set(
+            [...deciding]
+              .filter((k) => k.startsWith(`${state.profileId}/${activeRun.id}/`))
+              .map((k) => k.slice(`${state.profileId}/${activeRun.id}/`.length)),
+          )
+        }
         onSend={sendInRun}
         agents={AGENTS}
         models={MODELS}

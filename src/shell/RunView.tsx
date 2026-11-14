@@ -13,6 +13,8 @@ export interface RunViewProps {
   panelOpen: boolean;
   onTogglePanel: () => void;
   onDecide: (eventId: string, decision: ApprovalDecision) => Promise<void>;
+  /** Approvals whose decision is still being sent; shown disabled. */
+  decidingIds?: ReadonlySet<string>;
   onSend: (submission: ComposerSubmission) => Promise<void>;
   agents: PickerOption[];
   models: PickerOption[];
@@ -21,7 +23,16 @@ export interface RunViewProps {
 const NEAR_BOTTOM_PX = 120;
 
 /** A run rendered as a conversation: messages, tool-call cards and approvals. */
-export function RunView({ run, panelOpen, onTogglePanel, onDecide, onSend, agents, models }: RunViewProps) {
+export function RunView({
+  run,
+  panelOpen,
+  onTogglePanel,
+  onDecide,
+  decidingIds,
+  onSend,
+  agents,
+  models,
+}: RunViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const lastEvent = run.events[run.events.length - 1];
@@ -111,6 +122,7 @@ export function RunView({ run, panelOpen, onTogglePanel, onDecide, onSend, agent
                     key={event.id}
                     approval={event}
                     onDecide={(decision) => onDecide(event.id, decision)}
+                    disabled={decidingIds?.has(event.id) ?? false}
                   />
                 );
             }

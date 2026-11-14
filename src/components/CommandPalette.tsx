@@ -33,9 +33,14 @@ function PaletteDialog({ commands, onClose }: Omit<CommandPaletteProps, "open">)
 
   useEffect(() => {
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    inputRef.current?.focus();
+    const input = inputRef.current;
+    input?.focus();
     return () => {
-      previouslyFocused?.focus();
+      // Restore focus only if nothing else took it (e.g. a command that focused the composer).
+      const current = document.activeElement;
+      if (current === null || current === document.body || input === current) {
+        previouslyFocused?.focus();
+      }
     };
   }, []);
 
@@ -64,6 +69,8 @@ function PaletteDialog({ commands, onClose }: Omit<CommandPaletteProps, "open">)
           setActiveIndex((i) => (Math.min(i, enabled.length - 1) - 1 + enabled.length) % enabled.length);
         break;
       case "Enter":
+        // Enter that confirms an IME candidate must not run a command.
+        if (event.nativeEvent.isComposing) break;
         event.preventDefault();
         if (active) runCommand(active);
         break;

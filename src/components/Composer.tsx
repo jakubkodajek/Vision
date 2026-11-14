@@ -39,6 +39,8 @@ export interface ComposerProps {
   /** Hide the project picker when the project is fixed (inside a run). */
   showProjectPicker?: boolean;
   autoFocus?: boolean;
+  /** Changing this value moves focus to the input without clearing the draft. */
+  focusSignal?: number;
 }
 
 const MAX_HEIGHT_PX = 240;
@@ -101,6 +103,7 @@ export function Composer({
   disabledReason,
   showProjectPicker = true,
   autoFocus = false,
+  focusSignal = 0,
 }: ComposerProps) {
   const [text, setText] = useState("");
   const [agent, setAgent] = useState(defaults?.agent ?? agents[0]?.id ?? "");
@@ -113,6 +116,10 @@ export function Composer({
 
   // Keep the selected project valid when the project list changes (profile switch).
   const effectiveProject = projects.some((p) => p.id === projectId) ? projectId : (projects[0]?.id ?? "");
+
+  useEffect(() => {
+    if (focusSignal > 0) textareaRef.current?.focus();
+  }, [focusSignal]);
 
   useEffect(() => {
     const el = textareaRef.current;

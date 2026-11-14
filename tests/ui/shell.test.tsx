@@ -7,14 +7,14 @@ import { seriousViolations } from "./helpers";
 
 const instantLoad = (profileId: string): Promise<Workspace> => loadDemoWorkspace(profileId, 0);
 
-function renderShell(loadWorkspace: (id: string) => Promise<Workspace> = instantLoad) {
+function renderShell(loadWorkspace: (id: string) => Promise<Workspace> = instantLoad, decisionDelayMs = 0) {
   return render(
     <AppShell
       loadWorkspace={loadWorkspace}
       coreVersion="0.1.0"
       footer={<span>Core 0.1.0</span>}
       streamDelayMs={0}
-      decisionDelayMs={0}
+      decisionDelayMs={decisionDelayMs}
     />,
   );
 }
@@ -179,5 +179,65 @@ describe("AppShell", () => {
     });
     expect(errors).not.toHaveBeenCalled();
     errors.mockRestore();
+  });
+
+  it("decides an approval once even if the run is reopened while the decision is in flight", async () => {
+    renderShell(instantLoad, 100);
+    await openUiShellRun();
+    const agentMessages = () => document.querySelectorAll(".message-agent").length;
+    const before = agentMessages();
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    fireEvent.click(within(screen.getByRole("region", { name: "Recent runs" })).getByRole("button", { name: /Build the UI shell/ }));
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
+    expect(await screen.findByText(/Allowed once/)).toBeInTheDocument();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(agentMessages() - before).toBe(1);
+  });
+
+  it("ignores layout shortcuts while the palette is open", async () => {
+    renderShell();
+    await screen.findByRole("tree");
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "b", ctrlKey: true });
+    expect(shell()).toHaveAttribute("data-sidebar", "expanded");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("does not run a palette command on an IME confirmation Enter", async () => {
+    renderShell();
+    await screen.findByRole("tree");
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Search commands" }), { key: "Enter", isComposing: true });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("never splits an emoji when shortening a long task title", async () => {
+    renderShell();
+    await screen.findByRole("tree");
+    const input = screen.getByRole("textbox", { name: "Task description" });
+    await waitFor(() => {
+      expect(input).toBeEnabled();
+    });
+    fireEvent.change(input, { target: { value: `${"a".repeat(56)}😀😀 and more text after it` } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    const heading = await screen.findByRole("heading", { level: 2, name: /^a+/ });
+    expect(heading.textContent).toBe(`${"a".repeat(56)}😀…`);
+  });
+
+  it("keeps the home draft when New task is pressed again", async () => {
+    renderShell();
+    await screen.findByRole("tree");
+    const input = screen.getByRole("textbox", { name: "Task description" });
+    await waitFor(() => {
+      expect(input).toBeEnabled();
+    });
+    fireEvent.change(input, { target: { value: "Half-written idea" } });
+    fireEvent.keyDown(window, { key: "n", ctrlKey: true });
+    expect(screen.getByRole("textbox", { name: "Task description" })).toHaveValue("Half-written idea");
+    expect(screen.getByRole("textbox", { name: "Task description" })).toHaveFocus();
   });
 });
