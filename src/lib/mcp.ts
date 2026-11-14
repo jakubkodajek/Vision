@@ -45,6 +45,12 @@ export interface EntryRow {
   value: string;
   /** A secret already stored in the credential store, kept unless replaced. */
   stored: boolean;
+  /**
+   * The row came from a stored secret. Unticking Secret then needs a new value (an empty
+   * plain value would destroy the secret), and ticking it again while nothing was typed
+   * keeps the stored one.
+   */
+  wasStored: boolean;
 }
 
 let rowCounter = 0;
@@ -58,6 +64,7 @@ export function newRow(): EntryRow {
     secret: false,
     value: "",
     stored: false,
+    wasStored: false,
   };
 }
 
@@ -73,6 +80,7 @@ export function rowsFromEntries(entries: readonly KeyValueView[]): EntryRow[] {
           secret: false,
           value: entry.value.value,
           stored: false,
+          wasStored: false,
         }
       : {
           uid,
@@ -80,6 +88,7 @@ export function rowsFromEntries(entries: readonly KeyValueView[]): EntryRow[] {
           secret: true,
           value: "",
           stored: entry.value.has_value,
+          wasStored: entry.value.has_value,
         };
   });
 }
@@ -94,4 +103,86 @@ export function rowsToEntries(rows: readonly EntryRow[]): KeyValueInput[] {
       if (row.stored) return { key, value: { kind: "secret" } };
       return { key, value: { kind: "secret", value: row.value } };
     });
+}
+
+/** One problem in an env or header row, shown on that row's name or value input. */
+export interface RowError {
+  uid: string;
+  part: "key" | "value";
+  message: string;
+}
+
+/**
+ * Every problem in the rows (not only the first): missing names, names listed twice
+ * (case-insensitive for headers), too long names or values, a secret without a value, a
+ * stored secret turned plain without a new value, and a kept secret that has to be entered
+ * again because the destination changed (`reenter`).
+ */
+export function rowErrors(rows: readonly EntryRow[], kind: "env" | "header", reenter: boolean): RowError[] {
+  const errors: RowError[] = [];
+  const seen = new Set<string>();
+  const keyLimit = kind === "env" ? 128 : 64;
+  for (const row of rows) {
+    const key = row.key.trim();
+    if (key.length === 0 && row.value.length === 0 && !row.stored && !row.wasStored) continue;
+    if (key.length === 0) {
+      errors.push({
+        uid: row.uid,
+        part: "key",
+        message: kind === "env" ? "Enter a name for this variable." : "Enter a name for this header.",
+      });
+    } else {
+      const norm = kind === "header" ? key.toLowerCase() : key;
+      if (seen.has(norm))
+        errors.push({
+          uid: row.uid,
+          part: "key",
+          message: `'${key}' is listed twice. Remove one of them.`,
+        });
+      else if (key.length > keyLimit)
+        errors.push({
+          uid: row.uid,
+          part: "key",
+          message: `Use at most ${String(keyLimit)} characters.`,
+        });
+      seen.add(norm);
+    }
+    if (row.value.length > 8192) {
+      errors.push({
+        uid: row.uid,
+        part: "value",
+        message: "Use at most 8192 characters.",
+      });
+    } else if (row.stored && reenter) {
+      errors.push({
+        uid: row.uid,
+        part: "value",
+        message: "Enter this value again because the server address or command changed.",
+      });
+    } else if (row.wasStored && !row.secret && row.value.length === 0) {
+      errors.push({
+        uid: row.uid,
+        part: "value",
+        message: "Enter the new plain value, or tick Secret again to keep the stored one.",
+      });
+    } else if (row.secret && !row.stored && row.value.length === 0) {
+      errors.push({
+        uid: row.uid,
+        part: "value",
+        message: "Enter a value for this secret.",
+      });
+    }
+  }
+  return errors;
+}
+
+/** `scheme://host:port` of a URL, or `null` when it does not parse. */
+export function urlOrigin(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const port = u.port || (u.protocol === "https:" ? "443" : "80");
+    return `${u.protocol}//${u.hostname.toLowerCase()}:${port}`;
+  } catch {
+    return null;
+  }
 }

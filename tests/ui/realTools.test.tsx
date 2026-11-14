@@ -31,8 +31,8 @@ describe("tools view", () => {
   it("checks_every_tool_on_the_first_visit_with_a_spinner_per_card", async () => {
     const fake = standardFake().hold("toolCheck");
     await openTools(fake);
-    expect(within(card("Claude Code")).getByRole("status")).toHaveTextContent("Checking…");
-    expect(within(card("GitHub CLI")).getByRole("status")).toHaveTextContent("Checking…");
+    expect(within(card("Claude Code")).getByText("Checking…")).toBeInTheDocument();
+    expect(within(card("GitHub CLI")).getByText("Checking…")).toBeInTheDocument();
     expect(fake.calls("toolCheck")).toEqual([
       { profile_id: "p_work", tool_id: "claude" },
       { profile_id: "p_work", tool_id: "gh" },
@@ -138,7 +138,11 @@ describe("install", () => {
     fake.tools.set("p_work", [toolView(toolSpec("gh", "GitHub CLI"), { status: "not_installed" })]);
     fake.checkQueue.set("p_work/gh", [{ status: "not_installed" }]);
     await openTools(fake);
-    fireEvent.click(within(card("GitHub CLI")).getByRole("button", { name: "Install" }));
+    fireEvent.click(
+      within(card("GitHub CLI")).getByRole("button", {
+        name: /^Get installer/,
+      }),
+    );
     await flushReal();
     expect(fake.calls("toolOpenInstallPage")).toEqual([{ tool_id: "gh" }]);
   });
@@ -148,7 +152,11 @@ describe("install", () => {
     fake.tools.set("p_work", [toolView(toolSpec("gh", "GitHub CLI"), { status: "not_installed" })]);
     fake.checkQueue.set("p_work/gh", [{ status: "not_installed" }]);
     await openTools(fake);
-    fireEvent.click(within(card("GitHub CLI")).getByRole("button", { name: "Install" }));
+    fireEvent.click(
+      within(card("GitHub CLI")).getByRole("button", {
+        name: /^Get installer/,
+      }),
+    );
     expect(await settled(within(card("GitHub CLI")).findByRole("alert"))).toHaveTextContent(
       "No browser available",
     );
@@ -159,7 +167,9 @@ describe("sign-in", () => {
   it("sends_one_sign_in_for_a_double_click", async () => {
     const fake = standardFake().hold("toolSignIn");
     await openTools(fake);
-    const button = within(card("GitHub CLI")).getByRole("button", { name: "Sign in" });
+    const button = within(card("GitHub CLI")).getByRole("button", {
+      name: "Sign in",
+    });
     fireEvent.click(button);
     fireEvent.click(button);
     expect(fake.calls("toolSignIn")).toHaveLength(1);
@@ -187,9 +197,11 @@ describe("sign-in", () => {
     await openToolsWithFakeTimers(fake);
     fireEvent.click(within(card("GitHub CLI")).getByRole("button", { name: "Sign in" }));
     await flush();
-    expect(within(card("GitHub CLI")).getByRole("status")).toHaveTextContent(
-      "Waiting for sign-in in the terminal…",
-    );
+    expect(
+      within(card("GitHub CLI")).getByText(
+        "A terminal window opened. Finish signing in there; Vision checks every few seconds.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("polls_every_3_seconds_until_signed_in_and_shows_the_account", async () => {
@@ -204,7 +216,7 @@ describe("sign-in", () => {
     await flush(3000);
     await flush(3000);
     expect(within(card("GitHub CLI")).getByText("Signed in as octo-work")).toBeInTheDocument();
-    expect(within(card("GitHub CLI")).queryByText(/Waiting for sign-in/)).toBeNull();
+    expect(within(card("GitHub CLI")).queryByText(/Finish signing in there/)).toBeNull();
   });
 
   it("does_not_check_before_the_first_3_seconds", async () => {
@@ -222,10 +234,10 @@ describe("sign-in", () => {
     fireEvent.click(within(card("GitHub CLI")).getByRole("button", { name: "Sign in" }));
     await flush();
     const before = fake.calls("toolCheck").length;
-    fireEvent.click(within(card("GitHub CLI")).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(within(card("GitHub CLI")).getByRole("button", { name: "Stop waiting" }));
     await flush(30_000);
     expect(fake.calls("toolCheck")).toHaveLength(before);
-    expect(within(card("GitHub CLI")).queryByText(/Waiting for sign-in/)).toBeNull();
+    expect(within(card("GitHub CLI")).queryByText(/Finish signing in there/)).toBeNull();
   });
 
   it("gives_up_after_10_minutes_with_a_message", async () => {
@@ -237,7 +249,7 @@ describe("sign-in", () => {
     expect(
       within(card("GitHub CLI")).getByText(/No sign-in was detected within 10 minutes/),
     ).toBeInTheDocument();
-    expect(within(card("GitHub CLI")).queryByText(/Waiting for sign-in/)).toBeNull();
+    expect(within(card("GitHub CLI")).queryByText(/Finish signing in there/)).toBeNull();
   });
 
   it("stops_polling_after_the_timeout", async () => {
@@ -257,9 +269,11 @@ describe("sign-in", () => {
     fake.checkQueue.set("p_work/claude", [{ status: "signed_out" }]);
     fireEvent.click(within(card("Claude Code")).getByRole("button", { name: "Sign out" }));
     await flush();
-    expect(within(card("Claude Code")).getByRole("status")).toHaveTextContent(
-      "Waiting for sign-out in the terminal…",
-    );
+    expect(
+      within(card("Claude Code")).getByText(
+        "A terminal window opened. Finish signing out there; Vision checks every few seconds.",
+      ),
+    ).toBeInTheDocument();
     await flush(3000);
     expect(within(card("Claude Code")).getByText("Signed out")).toBeInTheDocument();
     expect(within(card("Claude Code")).getByRole("button", { name: "Sign in" })).toBeInTheDocument();
@@ -270,7 +284,10 @@ describe("sign-in", () => {
     await openToolsWithFakeTimers(fake);
     fake.checkQueue.set(
       "p_work/claude",
-      Array<ToolStatus>(60).fill({ status: "signed_in", account: "dev@work.example" }),
+      Array<ToolStatus>(60).fill({
+        status: "signed_in",
+        account: "dev@work.example",
+      }),
     );
     fireEvent.click(within(card("Claude Code")).getByRole("button", { name: "Sign out" }));
     await flush();
@@ -288,7 +305,7 @@ describe("sign-in", () => {
     fake.fail("toolCheck", "io", "Could not run gh");
     await flush(3000);
     expect(within(card("GitHub CLI")).getByRole("alert")).toHaveTextContent("Could not run gh");
-    expect(within(card("GitHub CLI")).queryByText(/Waiting for sign-in/)).toBeNull();
+    expect(within(card("GitHub CLI")).queryByText(/Finish signing in there/)).toBeNull();
   });
 
   it("stops_polling_on_unmount", async () => {

@@ -1,5 +1,7 @@
 import { CircleAlert } from "lucide-react";
 import {
+  createContext,
+  useContext,
   useId,
   type InputHTMLAttributes,
   type ReactNode,
@@ -8,6 +10,31 @@ import {
   type TextareaHTMLAttributes,
 } from "react";
 import { cx } from "../lib/cx";
+
+/**
+ * True while the form's request runs. Fields then ignore input (read-only text, inert
+ * selects and checkboxes) but stay focusable, so focus is never thrown out of a dialog the
+ * way a disabled fieldset would throw it.
+ */
+const FormBusyContext = createContext(false);
+
+/** Makes every field below it read-only while `busy`. */
+export function FormBusy({ busy, children }: { busy: boolean; children: ReactNode }) {
+  return <FormBusyContext.Provider value={busy}>{children}</FormBusyContext.Provider>;
+}
+
+/** Polite summary after a failed submit: "3 fields need attention." */
+export function ErrorSummary({ count, attempt }: { count: number; attempt: number }) {
+  return (
+    <p className="visually-hidden" role="status">
+      {attempt > 0 && count > 0 && (
+        <span key={attempt}>
+          {count === 1 ? "1 field needs attention." : `${String(count)} fields need attention.`}
+        </span>
+      )}
+    </p>
+  );
+}
 
 /** Field-level error text, linked to its control with aria-describedby. */
 export function FieldError({ id, children }: { id: string; children: ReactNode }) {
@@ -57,6 +84,7 @@ export type TextFieldProps = FieldChrome &
 
 /** Labelled text input with hint and error. */
 export function TextField({ label, hint, error, optional, className, inputRef, ...input }: TextFieldProps) {
+  const busy = useContext(FormBusyContext);
   const id = useId();
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
@@ -67,6 +95,7 @@ export function TextField({ label, hint, error, optional, className, inputRef, .
         {...input}
         ref={inputRef}
         id={id}
+        readOnly={busy || input.readOnly}
         className={cx(
           "input",
           input.type === undefined || input.type === "text" ? null : `input-${input.type}`,
@@ -88,6 +117,7 @@ export type TextAreaFieldProps = FieldChrome & Omit<TextareaHTMLAttributes<HTMLT
 
 /** Labelled multi-line input with hint and error. */
 export function TextAreaField({ label, hint, error, optional, className, ...textarea }: TextAreaFieldProps) {
+  const busy = useContext(FormBusyContext);
   const id = useId();
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
@@ -97,6 +127,7 @@ export function TextAreaField({ label, hint, error, optional, className, ...text
       <textarea
         {...textarea}
         id={id}
+        readOnly={busy || textarea.readOnly}
         className="input textarea"
         spellCheck={false}
         aria-invalid={error ? true : undefined}
@@ -127,6 +158,7 @@ export function SelectField({
   children,
   ...select
 }: SelectFieldProps) {
+  const busy = useContext(FormBusyContext);
   const id = useId();
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
@@ -136,6 +168,8 @@ export function SelectField({
       <select
         {...select}
         id={id}
+        aria-disabled={busy || undefined}
+        onChange={busy ? () => undefined : select.onChange}
         className="input select"
         aria-invalid={error ? true : undefined}
         aria-describedby={describedBy(error && errorId, hint !== undefined && hintId)}
@@ -162,11 +196,22 @@ export function CheckboxField({
   InputHTMLAttributes<HTMLInputElement>,
   "type" | "className"
 >) {
+  const busy = useContext(FormBusyContext);
   const id = useId();
   const hintId = `${id}-hint`;
   return (
     <div className={cx("checkbox-field", className)}>
-      <input {...input} id={id} type="checkbox" aria-describedby={hint ? hintId : undefined} />
+      <input
+        {...input}
+        id={id}
+        type="checkbox"
+        aria-disabled={busy || undefined}
+        onClick={(event) => {
+          if (busy) event.preventDefault();
+          else input.onClick?.(event);
+        }}
+        aria-describedby={hint ? hintId : undefined}
+      />
       <span className="checkbox-text">
         <label htmlFor={id}>{label}</label>
         {hint && (

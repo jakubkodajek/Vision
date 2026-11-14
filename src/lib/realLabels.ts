@@ -38,7 +38,7 @@ export function toolStatusLabel(status: ToolStatus | null): string {
     case "signed_out":
       return "Signed out";
     case "signed_in":
-      return "Signed in";
+      return status.warning ? "Signed in, see note" : "Signed in";
     case "unknown":
       return "Status unknown";
   }
@@ -79,4 +79,33 @@ export function transportTarget(server: McpServerView): string {
 /** "1 tool", "3 tools". */
 export function plural(count: number, one: string, many = `${one}s`): string {
   return `${String(count)} ${count === 1 ? one : many}`;
+}
+
+/** Status as a sentence part for announcements: "signed in", "not installed". */
+export function toolStatusPhrase(status: ToolStatus | null): string {
+  if (!status) return "not checked";
+  switch (status.status) {
+    case "not_installed":
+      return "not installed";
+    case "signed_out":
+      return "signed out";
+    case "signed_in":
+      return status.warning ? "signed in, see the note" : "signed in";
+    case "unknown":
+      return "status unknown";
+  }
+}
+
+/** Result of an MCP test as a sentence part for announcements. */
+export function mcpTestPhrase(health: McpServerView["health"]): string {
+  switch (health.status) {
+    case "ok":
+      return `test finished, working, ${plural(health.tools.length, "tool")}`;
+    case "needs_auth":
+      return "test finished, needs authorization";
+    case "error":
+      return "test failed";
+    case "untested":
+      return "not tested";
+  }
 }

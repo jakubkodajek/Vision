@@ -1,8 +1,36 @@
 /**
  * Client-side checks that mirror the core's rules, so most mistakes are shown next to the
- * field before anything is sent. The core stays the authority: its `invalid_input` message
- * is mapped back to a field with {@link fieldForCoreMessage}.
+ * field before anything is sent. The core stays the authority: its `invalid_input` and
+ * `conflict` errors name the input in `field`, which {@link customToolField} and
+ * {@link mcpField} map back to a form field.
  */
+
+/**
+ * Length limits of the core (crates/vision-core: profiles.rs, tools.rs, mcp/mod.rs), so a
+ * field cannot take obviously too long text.
+ */
+export const LIMITS = {
+  profileName: 40,
+  toolName: 40,
+  toolId: 32,
+  toolDescription: 200,
+  binary: 64,
+  argument: 512,
+  arguments: 32,
+  configVar: 48,
+  url: 2048,
+  serverName: 64,
+  command: 1024,
+  serverArgument: 4096,
+  serverArguments: 64,
+  entries: 64,
+  envKey: 128,
+  headerKey: 64,
+  value: 8192,
+} as const;
+
+/** Well-known config variables the core accepts without the _HOME/_DIR/_CONFIG suffix. */
+export const WELL_KNOWN_CONFIG_VARS = ["KUBECONFIG", "DOCKER_CONFIG", "HELM_CONFIG_HOME"] as const;
 
 /** Profile name: 1 to 40 characters after trimming (crates/vision-core/src/profiles.rs). */
 export function profileNameError(name: string): string | null {
@@ -14,20 +42,26 @@ export function profileNameError(name: string): string | null {
 
 const TOOL_ID = /^[a-z][a-z0-9_-]{0,31}$/;
 const BINARY = /^[A-Za-z0-9_+][A-Za-z0-9._+-]{0,63}$/;
-const CONFIG_VAR = /^[A-Z_][A-Z0-9_]{0,63}$/;
+const CONFIG_VAR = /^[A-Z][A-Z0-9_]{0,47}$/;
 
 /** Fields of the custom tool form. */
 export type CustomToolField =
   "name" | "id" | "description" | "binary" | "configVar" | "login" | "status" | "logout" | "installUrl";
 
-/** Derives a tool id from a name: "My Tool 2" becomes "my-tool-2". */
+/**
+ * Derives a tool id from a name: "My Tool 2" becomes "my-tool-2". A slug longer than 32
+ * characters is cut at the last hyphen before the limit, so no word is cut in half (a
+ * single word longer than the limit is cut at 32).
+ */
 export function toolIdFromName(name: string): string {
   const slug = name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^[^a-z]+/, "")
     .replace(/-+$/, "");
-  return slug.slice(0, 32).replace(/-+$/, "");
+  if (slug.length <= LIMITS.toolId) return slug;
+  const cut = slug.lastIndexOf("-", LIMITS.toolId);
+  return (cut > 0 ? slug.slice(0, cut) : slug.slice(0, LIMITS.toolId)).replace(/-+$/, "");
 }
 
 /** Values of the custom tool form, as typed. */
@@ -58,11 +92,27 @@ export function customToolErrors(d: CustomToolDraft): Partial<Record<CustomToolF
     errors.binary = "Use a plain program name without a path, spaces or shell characters.";
   if (!CONFIG_VAR.test(d.configVar))
     errors.configVar = "Use an upper-case variable name like MYTOOL_CONFIG_DIR.";
-  if (d.login.length === 0) errors.login = "Enter at least one argument, for example login.";
-  else if (d.login.length > 32) errors.login = "Use at most 32 arguments.";
-  if (d.status.length > 32) errors.status = "Use at most 32 arguments.";
-  if (d.logout.length > 32) errors.logout = "Use at most 32 arguments.";
-  if (d.installUrl.length > 0 && !/^https:\/\/[^\s/@]+/.test(d.installUrl))
+  else if (
+    !(WELL_KNOWN_CONFIG_VARS as readonly string[]).includes(d.configVar) &&
+    !/.(_HOME|_DIR|_CONFIG|_CONFIG_FILE)$/.test(d.configVar)
+  )
+    errors.configVar =
+      "End the name with _CONFIG_DIR, _CONFIG_HOME, _HOME, _CONFIG, _CONFIG_FILE or _DIR, like MYTOOL_CONFIG_DIR.";
+  const argsError = (list: string[], required: boolean): string | undefined => {
+    if (required && list.length === 0) return "Enter at least one argument, for example login.";
+    if (list.length > LIMITS.arguments) return `Use at most ${String(LIMITS.arguments)} arguments.`;
+    if (list.some((a) => Array.from(a).length > LIMITS.argument))
+      return `Use at most ${String(LIMITS.argument)} characters per argument.`;
+    return undefined;
+  };
+  const login = argsError(d.login, true);
+  if (login) errors.login = login;
+  const status = argsError(d.status, false);
+  if (status) errors.status = status;
+  const logout = argsError(d.logout, false);
+  if (logout) errors.logout = logout;
+  if (d.installUrl.length > LIMITS.url) errors.installUrl = `Use at most ${String(LIMITS.url)} characters.`;
+  else if (d.installUrl.length > 0 && !/^https:\/\/[^\s/@]+/.test(d.installUrl))
     errors.installUrl = "Use an https:// address.";
   return errors;
 }
@@ -79,54 +129,67 @@ export function serverNameError(name: string): string | null {
   return null;
 }
 
-/** URL rule: https, or http only for localhost, 127.0.0.1 and [::1]. */
+const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]", "::1"];
+
+/**
+ * URL rule of the core (crates/vision-core/src/mcp/mod.rs `validate_url`): at most 2048
+ * characters, no spaces or control characters, the exact lower-case scheme `https://` (or
+ * `http://` only for localhost, 127.0.0.1 and [::1]), a host, and no credentials before an
+ * `@`.
+ */
 export function serverUrlError(url: string): string | null {
   if (url.length === 0) return "Enter the server URL.";
-  if (/\s/.test(url)) return "The URL cannot contain spaces.";
-  if (/^https:\/\/[^/?#]+/.test(url)) return null;
-  if (/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?([/?#]|$)/i.test(url)) return null;
-  if (url.startsWith("http://")) return "Plain http:// is only allowed for localhost; use https://.";
+  // eslint-disable-next-line no-control-regex
+  if (url.length > LIMITS.url || /[\s\u0000-\u001f\u007f-\u009f]/.test(url))
+    return "The URL is too long or contains spaces.";
+  const split = url.indexOf("://");
+  if (split < 0) return "The URL must start with https://.";
+  const scheme = url.slice(0, split);
+  const authority = url.slice(split + 3).split(/[/?#]/)[0] ?? "";
+  if (authority.length === 0) return "The URL has no host.";
+  if (authority.includes("@")) return "Put credentials in a header, not in the URL.";
+  const host = (
+    authority.startsWith("[")
+      ? authority.slice(0, authority.indexOf("]") + 1)
+      : (authority.split(":")[0] ?? "")
+  ).toLowerCase();
+  if (scheme === "https" && host.length > 0) return null;
+  if (scheme === "http" && LOCAL_HOSTS.includes(host)) return null;
+  if (scheme === "http")
+    return "Plain http:// is only allowed for localhost, 127.0.0.1 and [::1]; use https://.";
   return "The URL must start with https://.";
 }
 
-const CUSTOM_TOOL_PATTERNS: [RegExp, CustomToolField][] = [
-  [/^Tool ids|built-in tool/i, "id"],
-  [/^The name/i, "name"],
-  [/^The description/i, "description"],
-  [/^The binary/i, "binary"],
-  [/install page/i, "installUrl"],
-  [/config variable/i, "configVar"],
-  [/^Sign-in command/i, "login"],
-  [/^Status command/i, "status"],
-  [/^Sign-out command/i, "logout"],
-];
+/** Custom tool fields named by the core's `IpcError.field` (crates/vision-core/src/tools.rs). */
+const CUSTOM_TOOL_CORE_FIELDS: Readonly<Record<string, CustomToolField>> = {
+  id: "id",
+  name: "name",
+  description: "description",
+  binary: "binary",
+  install_url: "installUrl",
+  config_var: "configVar",
+  login: "login",
+  status: "status",
+  logout: "logout",
+};
 
-const MCP_PATTERNS: [RegExp, McpField][] = [
-  [/^Server names|server with this name/i, "name"],
-  [/^The command/i, "command"],
-  [/arguments/i, "args"],
-  [/URL|http:\/\/|credentials in a header/i, "url"],
-  [/^Variable names|^Header names|listed twice|^The value of|secret '|at most 64 entries/i, "entries"],
-  [/^Unknown tool/i, "tools"],
-];
+/** MCP fields named by the core's `IpcError.field` (crates/vision-core/src/mcp/mod.rs, core.rs). */
+const MCP_CORE_FIELDS: Readonly<Record<string, McpField>> = {
+  name: "name",
+  command: "command",
+  args: "args",
+  url: "url",
+  env: "entries",
+  headers: "entries",
+  tool_ids: "tools",
+};
 
-function match<F extends string>(patterns: readonly [RegExp, F][], message: string): F | null {
-  for (const [pattern, field] of patterns) {
-    if (pattern.test(message)) return field;
-  }
-  return null;
+/** The custom tool form field a core error is about, or `null` for a form-level error. */
+export function customToolField(error: { field: string | null } | null): CustomToolField | null {
+  return error?.field ? (CUSTOM_TOOL_CORE_FIELDS[error.field] ?? null) : null;
 }
 
-/**
- * Maps a core validation message about a custom tool to its form field, or `null` for a
- * form-level message. The core reports one message per error and no field name, so this
- * matches the wording in crates/vision-core/src/tools.rs and ids.rs.
- */
-export function customToolFieldFor(message: string): CustomToolField | null {
-  return match(CUSTOM_TOOL_PATTERNS, message);
-}
-
-/** Like {@link customToolFieldFor} for the MCP server form (crates/vision-core/src/mcp/mod.rs). */
-export function mcpFieldFor(message: string): McpField | null {
-  return match(MCP_PATTERNS, message);
+/** The MCP server form field a core error is about, or `null` for a form-level error. */
+export function mcpField(error: { field: string | null } | null): McpField | null {
+  return error?.field ? (MCP_CORE_FIELDS[error.field] ?? null) : null;
 }

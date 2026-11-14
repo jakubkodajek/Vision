@@ -1,15 +1,15 @@
-import { ChevronRight, KeyRound, Pencil, Plus, RefreshCw, Trash2, UploadCloud, Zap } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { ChevronRight, KeyRound, Pencil, Plus, RefreshCw, Trash2, UploadCloud, X, Zap } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
 import { McpHealthBadge } from "../components/badges";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Dialog } from "../components/Dialog";
+import { LiveRegion } from "../components/LiveRegion";
 import { Button, EmptyState, ErrorState, Skeleton, Spinner } from "../components/primitives";
 import { useVision } from "../data/context";
-import { errorText } from "../data/errors";
-import { useAsyncAction } from "../data/useAsyncAction";
+import { asIpcError, errorText } from "../data/errors";
+import type { VisionIpcError } from "../ipc/client";
 import type { McpServerView, Platform, Profile, SyncReport } from "../ipc/bindings";
 import { cx } from "../lib/cx";
-import { serverToInput } from "../lib/mcp";
 import { plural, transportLabel, transportTarget } from "../lib/realLabels";
 import { McpServerDialog } from "./McpServerDialog";
 
@@ -21,6 +21,7 @@ export function McpView({ profile }: { profile: Profile }) {
   const [editing, setEditing] = useState<Editing>(null);
   const [syncing, setSyncing] = useState(false);
   const slot = state.mcp[profile.id] ?? { kind: "loading" as const };
+  const syncHintId = useId();
 
   useEffect(() => {
     actions.ensureMcp(profile.id);
@@ -31,9 +32,11 @@ export function McpView({ profile }: { profile: Profile }) {
   const tools = state.tools[profile.id];
   if (tools?.list.kind === "ready")
     for (const e of tools.list.data) toolNames.set(e.view.spec.id, e.view.spec.name);
+  const empty = slot.kind === "ready" && slot.data.length === 0;
 
   return (
     <div className="section-view">
+      <LiveRegion scope="mcp" />
       <header className="view-header">
         <div className="view-header-main">
           <h2 className="view-title" tabIndex={-1} data-focus-fallback>
@@ -45,7 +48,8 @@ export function McpView({ profile }: { profile: Profile }) {
           <Button
             size="sm"
             icon={<UploadCloud width={14} height={14} aria-hidden="true" />}
-            disabled={slot.kind !== "ready"}
+            inactive={slot.kind !== "ready" || empty}
+            aria-describedby={empty ? syncHintId : undefined}
             onClick={() => {
               setSyncing(true);
             }}
@@ -89,23 +93,17 @@ export function McpView({ profile }: { profile: Profile }) {
               }}
             />
           )}
-          {slot.kind === "ready" && slot.data.length === 0 && (
+          {empty && (
             <EmptyState
               icon={<Zap width={28} height={28} />}
               title="No MCP servers yet"
-              description="Add a local command (stdio) or a remote server (HTTP). Test it to see which tools it offers."
-              action={
-                <Button
-                  variant="primary"
-                  icon={<Plus width={14} height={14} aria-hidden="true" />}
-                  onClick={() => {
-                    setEditing({ kind: "add" });
-                  }}
-                >
-                  Add server
-                </Button>
-              }
+              description="Select Add server to add a local command (stdio) or a remote server (HTTP). Test it to see which tools it offers."
             />
+          )}
+          {empty && (
+            <p id={syncHintId} className="field-hint">
+              Sync to Claude Code is available once this profile has a server.
+            </p>
           )}
           {slot.kind === "ready" && slot.data.length > 0 && (
             <ul className="server-list">
@@ -118,6 +116,9 @@ export function McpView({ profile }: { profile: Profile }) {
                     toolNames={toolNames}
                     onEdit={() => {
                       setEditing({ kind: "edit", server });
+                    }}
+                    onSync={() => {
+                      setSyncing(true);
                     }}
                   />
                 </li>
@@ -139,6 +140,7 @@ export function McpView({ profile }: { profile: Profile }) {
         <SyncDialog
           profile={profile}
           platform={state.platform}
+          servers={slot.kind === "ready" ? slot.data : []}
           onClose={() => {
             setSyncing(false);
           }}
@@ -148,41 +150,88 @@ export function McpView({ profile }: { profile: Profile }) {
   );
 }
 
-/** One server: health, tools, enabled switch and actions. */
+type RowAction = "test" | "toggle" | "authorize";
+
+const ROW_ERROR_TITLE: Record<RowAction, string> = {
+  test: "Could not run the test",
+  toggle: "Could not change the server",
+  authorize: "Could not open the authorization",
+};
+
+/** "Synced to Claude Code", "Not synced", "Not synced: has secret values". */
+function syncLabel(server: McpServerView): string {
+  if (server.synced) return "Synced to Claude Code";
+  return server.has_secrets ? "Not synced: has secret values" : "Not synced";
+}
+
+/**
+ * One server: health, sync state, tools, the enabled switch and actions. While its test
+ * runs, Edit, Delete and the switch are unavailable (`aria-disabled`, focus stays). The row
+ * keeps one last error, cleared by Dismiss or by the next action on the row that succeeds.
+ */
 export function ServerRow({
   profileId,
   server,
   platform,
   toolNames,
   onEdit,
+  onSync,
 }: {
   profileId: string;
   server: McpServerView;
   platform: Platform | null;
   toolNames: ReadonlyMap<string, string>;
   onEdit: () => void;
+  onSync: () => void;
 }) {
   const { actions } = useVision();
   const [expanded, setExpanded] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [authorized, setAuthorized] = useState(false);
+  const [running, setRunning] = useState<RowAction | null>(null);
+  const [lastError, setLastError] = useState<{
+    action: RowAction;
+    error: VisionIpcError;
+  } | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const headingId = useId();
   const toolsId = useId();
-  const test = useAsyncAction(() => actions.testServer(profileId, server.id));
-  const toggle = useAsyncAction((enabled: boolean) =>
-    actions.saveServer(profileId, serverToInput(server, { enabled })),
-  );
-  const authorize = useAsyncAction(() => actions.authorizeServer(profileId, server.id));
   const { health } = server;
   const tested = health.status !== "untested";
   const isHttp = server.transport.kind === "http";
-  const error = test.error ?? toggle.error ?? authorize.error;
-  const errorTitle = test.error
-    ? "Could not run the test"
-    : toggle.error
-      ? "Could not change the server"
-      : "Could not open the authorization";
+  const testing = running === "test";
   const logins = server.tool_ids.map((id) => toolNames.get(id) ?? id);
+  const needsAuth = health.status === "needs_auth" && isHttp;
+
+  const run = async (action: RowAction, fn: () => Promise<unknown>): Promise<boolean> => {
+    if (running) return false;
+    setRunning(action);
+    try {
+      await fn();
+      if (mounted.current) setLastError(null);
+      return true;
+    } catch (e: unknown) {
+      if (mounted.current) setLastError({ action, error: asIpcError(e) });
+      return false;
+    } finally {
+      if (mounted.current) setRunning(null);
+    }
+  };
+
+  // One current hint per row: what to do next.
+  const hint = authorized
+    ? "Authorization opened in your terminal. Test the server again when you have finished."
+    : needsAuth && !server.synced
+      ? "Next: sync to Claude Code, then select Authorize to sign in to the server in your terminal."
+      : needsAuth
+        ? "Next: select Authorize to sign in to the server in your terminal."
+        : null;
 
   return (
     <article className={cx("server-row", !server.enabled && "is-disabled")} aria-labelledby={headingId}>
@@ -192,8 +241,8 @@ export function ServerRow({
             {server.name}
           </h3>
           <span className="server-transport">{transportLabel(server)}</span>
-          {test.busy ? (
-            <span className="badge badge-neutral" role="status">
+          {testing ? (
+            <span className="badge badge-neutral">
               <Spinner size={14} />
               <span>Testing…</span>
             </span>
@@ -204,60 +253,89 @@ export function ServerRow({
             <span className="server-tool-count">{plural(health.tools.length, "tool")}</span>
           )}
         </div>
-        <p className="server-target" title={transportTarget(server)}>
-          {transportTarget(server)}
-        </p>
+        <p className="server-target is-wrap">{transportTarget(server)}</p>
+        <p className={cx("server-sync", server.synced && "is-synced")}>{syncLabel(server)}</p>
         {logins.length > 0 && <p className="server-logins">Uses sign-ins of {logins.join(", ")}</p>}
         {health.message && (health.status === "error" || health.status === "needs_auth") && (
           <p className={cx("server-health-message", health.status === "error" && "is-error")}>
             {health.message}
           </p>
         )}
-        {health.status === "needs_auth" && isHttp && (
-          <p className="server-health-message">
-            Sync to Claude Code first, then select Authorize to sign in to the server in your terminal.
-          </p>
-        )}
-        {authorized && (
-          <p className="server-health-message" role="status">
-            Authorization opened in your terminal. Test the server again when you have finished.
-          </p>
-        )}
-        {error && <ErrorState compact title={errorTitle} message={errorText(error, platform)} />}
+        {hint && <p className="server-health-message">{hint}</p>}
+        {lastError &&
+          (lastError.error.code === "not_approved" ? (
+            <div className="card-notice">
+              <p>You declined to run this command. Nothing was run.</p>
+              <DismissButton
+                onClick={() => {
+                  setLastError(null);
+                }}
+              />
+            </div>
+          ) : (
+            <div className="card-notice is-error" role="alert">
+              <div>
+                <p className="card-notice-title">{ROW_ERROR_TITLE[lastError.action]}</p>
+                <p>{errorText(lastError.error, platform)}</p>
+              </div>
+              <DismissButton
+                onClick={() => {
+                  setLastError(null);
+                }}
+              />
+            </div>
+          ))}
       </div>
       <div className="server-side">
-        <label className="switch">
+        <label className={cx("switch", running !== null && "is-inactive")}>
           <input
             type="checkbox"
             role="switch"
             checked={server.enabled}
-            disabled={toggle.busy}
-            aria-describedby={headingId}
-            onChange={(e) => void toggle.run(e.target.checked)}
+            aria-disabled={running !== null || undefined}
+            aria-label={`Enabled: ${server.name}`}
+            onChange={(e) => {
+              if (running !== null) return;
+              const enabled = e.target.checked;
+              void run("toggle", () => actions.setServerEnabled(profileId, server.id, enabled));
+            }}
           />
           <span className="switch-track" aria-hidden="true" />
-          <span>Enabled</span>
+          <span aria-hidden="true">Enabled</span>
         </label>
         <div className="server-actions">
+          {needsAuth && !server.synced && (
+            <Button
+              size="sm"
+              variant="primary"
+              icon={<UploadCloud width={14} height={14} aria-hidden="true" />}
+              aria-describedby={headingId}
+              onClick={onSync}
+            >
+              Sync to Claude Code
+            </Button>
+          )}
           <Button
             size="sm"
             icon={<RefreshCw width={14} height={14} aria-hidden="true" />}
-            loading={test.busy}
+            loading={testing}
+            inactive={running !== null && !testing}
             aria-describedby={headingId}
-            onClick={() => void test.run()}
+            onClick={() => void run("test", () => actions.testServer(profileId, server.id))}
           >
             Test
           </Button>
           {isHttp && (
             <Button
               size="sm"
-              variant={health.status === "needs_auth" ? "primary" : "secondary"}
+              variant={needsAuth && server.synced ? "primary" : "secondary"}
               icon={<KeyRound width={14} height={14} aria-hidden="true" />}
-              loading={authorize.busy}
+              loading={running === "authorize"}
+              inactive={running !== null && running !== "authorize"}
               aria-describedby={headingId}
               onClick={() =>
-                void authorize.run().then((r) => {
-                  if (r.ok) setAuthorized(true);
+                void run("authorize", () => actions.authorizeServer(profileId, server.id)).then((ok) => {
+                  if (ok && mounted.current) setAuthorized(true);
                 })
               }
             >
@@ -269,6 +347,7 @@ export function ServerRow({
             variant="ghost"
             icon={<Pencil width={14} height={14} aria-hidden="true" />}
             aria-label={`Edit ${server.name}`}
+            inactive={running !== null}
             onClick={onEdit}
           >
             Edit
@@ -279,6 +358,7 @@ export function ServerRow({
             className="is-danger-text"
             icon={<Trash2 width={14} height={14} aria-hidden="true" />}
             aria-label={`Delete ${server.name}`}
+            inactive={running !== null}
             onClick={() => {
               setConfirmDelete(true);
             }}
@@ -336,26 +416,69 @@ export function ServerRow({
   );
 }
 
-function SyncResult({ report }: { report: SyncReport }) {
-  const nothing = report.synced.length === 0 && report.removed.length === 0 && report.failed.length === 0;
+function DismissButton({ onClick }: { onClick: () => void }) {
   return (
-    <div className="sync-result" role="status">
+    <button
+      type="button"
+      className="icon-btn icon-btn-sm"
+      aria-label="Dismiss"
+      title="Dismiss"
+      onClick={onClick}
+    >
+      <X width={14} height={14} aria-hidden="true" />
+    </button>
+  );
+}
+
+/** What to do after a sync: authorize synced servers that need it. */
+function nextSteps(report: SyncReport, servers: readonly McpServerView[]): string[] {
+  const steps = servers
+    .filter((s) => report.synced.includes(s.name) && s.health.status === "needs_auth")
+    .map((s) => `Next: select Authorize on ${s.name}.`);
+  if (report.skipped.length > 0)
+    steps.push(
+      "Skipped servers stay in Vision. Mark their values as plain to sync them, if you accept that.",
+    );
+  return steps;
+}
+
+function SyncResult({ report, servers }: { report: SyncReport; servers: readonly McpServerView[] }) {
+  const nothing =
+    report.synced.length === 0 &&
+    report.removed.length === 0 &&
+    report.failed.length === 0 &&
+    report.skipped.length === 0;
+  const steps = nextSteps(report, servers);
+  return (
+    <div className="sync-result">
       {nothing && <p>There was nothing to sync: no server is enabled and none was synced before.</p>}
       {report.synced.length > 0 && (
         <div className="sync-group">
-          <h3 className="sync-heading">Synced ({String(report.synced.length)})</h3>
+          <h4 className="sync-heading">Synced ({String(report.synced.length)})</h4>
           <p className="is-mono">{report.synced.join(", ")}</p>
         </div>
       )}
       {report.removed.length > 0 && (
         <div className="sync-group">
-          <h3 className="sync-heading">Removed from Claude Code ({String(report.removed.length)})</h3>
+          <h4 className="sync-heading">Removed from Claude Code ({String(report.removed.length)})</h4>
           <p className="is-mono">{report.removed.join(", ")}</p>
+        </div>
+      )}
+      {report.skipped.length > 0 && (
+        <div className="sync-group">
+          <h4 className="sync-heading">Skipped ({String(report.skipped.length)})</h4>
+          <ul>
+            {report.skipped.map((s) => (
+              <li key={s.name}>
+                <span className="is-mono">{s.name}</span>: {s.reason}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       {report.failed.length > 0 && (
         <div className="sync-group is-error">
-          <h3 className="sync-heading">Failed ({String(report.failed.length)})</h3>
+          <h4 className="sync-heading">Failed ({String(report.failed.length)})</h4>
           <ul>
             {report.failed.map((f) => (
               <li key={f.name}>
@@ -365,45 +488,83 @@ function SyncResult({ report }: { report: SyncReport }) {
           </ul>
         </div>
       )}
+      {steps.map((step) => (
+        <p key={step} className="sync-next">
+          {step}
+        </p>
+      ))}
     </div>
   );
 }
 
-/** Confirms the sync (it writes secret values into Claude Code's config), then shows the result. */
+/**
+ * Confirms the sync, then shows the result. Servers with secret values are not synced:
+ * Claude Code would keep them as plain text in its configuration. When the result replaces
+ * the confirmation, focus moves to its heading so the keyboard stays in the dialog.
+ */
 export function SyncDialog({
   profile,
   platform,
+  servers,
   onClose,
 }: {
   profile: Profile;
   platform: Platform | null;
+  servers: readonly McpServerView[];
   onClose: () => void;
 }) {
   const { actions } = useVision();
-  const sync = useAsyncAction(() => actions.syncClaude(profile.id));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<VisionIpcError | null>(null);
   const [report, setReport] = useState<SyncReport | null>(null);
+  // Next steps refer to the servers as they were when the sync ran.
+  const [snapshot, setSnapshot] = useState<readonly McpServerView[]>(servers);
+  const resultRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    if (report) resultRef.current?.focus();
+  }, [report]);
+
+  const start = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    setSnapshot(servers);
+    try {
+      setReport(await actions.syncClaude(profile.id));
+    } catch (e: unknown) {
+      setError(asIpcError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Dialog
       title="Sync to Claude Code"
       description={`Writes the enabled MCP servers of ${profile.name} into this profile's Claude Code configuration.`}
       onClose={onClose}
       size="sm"
-      dismissible={!sync.busy}
+      dismissible={!busy}
     >
       <div className="dialog-form">
         <div className="dialog-content">
           {report ? (
-            <SyncResult report={report} />
+            <>
+              <h3 ref={resultRef} className="sync-title" tabIndex={-1}>
+                Sync finished
+              </h3>
+              <SyncResult report={report} servers={snapshot} />
+            </>
           ) : (
             <>
               <p className="dialog-text">
-                Secret values are written into that Claude Code configuration, because Claude Code keeps
-                server settings in its own config file. Servers that Vision synced before and that are now
-                disabled or deleted are removed there.
+                Servers with secret values are not synced, because Claude Code would store those values as
+                plain text in its configuration. If you accept that for a value, untick Secret for it in the
+                server's settings. Servers that Vision synced before and that are now disabled or deleted are
+                removed there.
               </p>
-              {sync.error && (
-                <ErrorState compact title="Could not sync" message={errorText(sync.error, platform)} />
-              )}
+              {error && <ErrorState compact title="Could not sync" message={errorText(error, platform)} />}
             </>
           )}
         </div>
@@ -414,18 +575,10 @@ export function SyncDialog({
             </Button>
           ) : (
             <>
-              <Button onClick={onClose} disabled={sync.busy}>
+              <Button inactive={busy} onClick={onClose}>
                 Cancel
               </Button>
-              <Button
-                variant="primary"
-                loading={sync.busy}
-                onClick={() =>
-                  void sync.run().then((r) => {
-                    if (r.ok) setReport(r.value);
-                  })
-                }
-              >
+              <Button variant="primary" loading={busy} onClick={() => void start()}>
                 Sync now
               </Button>
             </>

@@ -16,10 +16,18 @@ async function openDialog(fake: FakeClient): Promise<HTMLElement> {
 }
 
 function fillValid(dialog: HTMLElement): void {
-  fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "My Tool" } });
-  fireEvent.change(within(dialog).getByLabelText("Program"), { target: { value: "mytool" } });
-  fireEvent.change(within(dialog).getByLabelText("Config variable"), { target: { value: "MYTOOL_HOME" } });
-  fireEvent.change(within(dialog).getByLabelText("Sign-in arguments"), { target: { value: "auth\nlogin" } });
+  fireEvent.change(within(dialog).getByLabelText("Name"), {
+    target: { value: "My Tool" },
+  });
+  fireEvent.change(within(dialog).getByLabelText("Program"), {
+    target: { value: "mytool" },
+  });
+  fireEvent.change(within(dialog).getByLabelText("Config variable"), {
+    target: { value: "MYTOOL_HOME" },
+  });
+  fireEvent.change(within(dialog).getByLabelText("Sign-in arguments"), {
+    target: { value: "auth\nlogin" },
+  });
 }
 
 function withCustomTool(): FakeClient {
@@ -48,20 +56,30 @@ describe("custom tool dialog", () => {
 
   it("derives_the_id_from_the_name", async () => {
     const dialog = await openDialog(standardFake());
-    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "My Tool" } });
-    expect(within(dialog).getByLabelText("Id")).toHaveValue("my-tool");
+    fireEvent.change(within(dialog).getByLabelText("Name"), {
+      target: { value: "My Tool" },
+    });
+    expect(within(dialog).getByLabelText("Identifier")).toHaveValue("my-tool");
   });
 
   it("rejects_an_id_that_already_exists", async () => {
     const dialog = await openDialog(standardFake());
     fillValid(dialog);
-    fireEvent.change(within(dialog).getByLabelText("Id"), { target: { value: "gh" } });
+    fireEvent.change(within(dialog).getByLabelText("Identifier"), {
+      target: { value: "gh" },
+    });
     fireEvent.click(within(dialog).getByRole("button", { name: "Add tool" }));
-    expect(within(dialog).getByLabelText("Id")).toHaveAccessibleDescription(/already exists/);
+    expect(within(dialog).getByLabelText("Identifier")).toHaveAccessibleDescription(/already exists/);
   });
 
   it("shows_a_core_validation_error_under_its_field", async () => {
-    const fake = standardFake().fail("customToolSave", "invalid_input", "The binary must be a plain name");
+    const fake = standardFake().fail(
+      "customToolSave",
+      "invalid_input",
+      "The binary must be a plain name",
+      false,
+      "binary",
+    );
     const dialog = await openDialog(fake);
     fillValid(dialog);
     fireEvent.click(within(dialog).getByRole("button", { name: "Add tool" }));
@@ -71,7 +89,7 @@ describe("custom tool dialog", () => {
     );
   });
 
-  it("adds_the_tool_and_checks_it", async () => {
+  it("adds_the_tool_without_running_it_before_approval", async () => {
     const fake = standardFake();
     const dialog = await openDialog(fake);
     fillValid(dialog);
@@ -90,7 +108,10 @@ describe("custom tool dialog", () => {
         replace: false,
       },
     ]);
-    expect(fake.calls("toolCheck")).toContainEqual({ profile_id: "p_work", tool_id: "my-tool" });
+    expect(fake.calls("toolCheck")).not.toContainEqual({
+      profile_id: "p_work",
+      tool_id: "my-tool",
+    });
   });
 
   it("closes_the_dialog_after_adding", async () => {
@@ -115,7 +136,11 @@ describe("delete custom tool", () => {
     const fake = withCustomTool();
     renderApp(fake);
     fireEvent.click(await settled(screen.findByRole("button", { name: "Tools" })));
-    fireEvent.click(within(await settled(findCard("My Tool"))).getByRole("button", { name: "Delete" }));
+    fireEvent.click(
+      within(await settled(findCard("My Tool"))).getByRole("button", {
+        name: "Delete",
+      }),
+    );
     fireEvent.click(
       within(screen.getByRole("alertdialog", { name: "Delete My Tool?" })).getByRole("button", {
         name: "Delete tool",
@@ -130,7 +155,11 @@ describe("delete custom tool", () => {
     const fake = withCustomTool().fail("customToolDelete", "io", "Disk full");
     renderApp(fake);
     fireEvent.click(await settled(screen.findByRole("button", { name: "Tools" })));
-    fireEvent.click(within(await settled(findCard("My Tool"))).getByRole("button", { name: "Delete" }));
+    fireEvent.click(
+      within(await settled(findCard("My Tool"))).getByRole("button", {
+        name: "Delete",
+      }),
+    );
     const dialog = screen.getByRole("alertdialog", { name: "Delete My Tool?" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete tool" }));
     expect(await settled(within(dialog).findByRole("alert"))).toHaveTextContent("Disk full");

@@ -9,7 +9,7 @@ import type {
   SyncReport,
   ToolSpecView,
 } from "../ipc/bindings";
-import type { DataState } from "./store";
+import type { AnnounceScope, DataState } from "./store";
 
 /** Polling interval and timeouts of the sign-in and sign-out wait. */
 export interface VisionTiming {
@@ -38,6 +38,8 @@ export interface VisionActions {
   /** Persists and shows another profile. Ignored while a switch is in flight. */
   switchProfile: (profileId: string) => Promise<void>;
   openProfileTerminal: (profileId: string) => Promise<void>;
+  /** Opens the Vision releases page in the default browser. */
+  openReleasesPage: () => Promise<void>;
   /** Loads the tool list and, on the first visit per profile, checks every tool. */
   visitTools: (profileId: string) => void;
   /** Loads the cached tool list if it is not loaded (no status checks). */
@@ -56,10 +58,18 @@ export interface VisionActions {
   ensureMcp: (profileId: string) => void;
   reloadMcp: (profileId: string) => void;
   saveServer: (profileId: string, server: McpServerInput) => Promise<McpServerView>;
+  /** Turns a server on or off without touching its health or its secrets. */
+  setServerEnabled: (profileId: string, serverId: string, enabled: boolean) => Promise<McpServerView>;
   deleteServer: (profileId: string, serverId: string) => Promise<void>;
-  testServer: (profileId: string, serverId: string) => Promise<McpServerView>;
+  /**
+   * Tests a server. Resolves to `null` when the answer is stale (the row was saved,
+   * toggled or deleted meanwhile) or the server no longer exists (its row is removed).
+   */
+  testServer: (profileId: string, serverId: string) => Promise<McpServerView | null>;
   authorizeServer: (profileId: string, serverId: string) => Promise<void>;
   syncClaude: (profileId: string) => Promise<SyncReport>;
+  /** Says `text` politely in the live region of a view (tools, mcp, profiles). */
+  announce: (scope: AnnounceScope, text: string) => void;
 }
 
 /** Value of the data context. */

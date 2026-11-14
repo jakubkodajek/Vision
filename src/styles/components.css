@@ -31,7 +31,7 @@
   color: var(--accent-fg);
 }
 
-.btn-primary:hover:not(:disabled) {
+.btn-primary:hover:not(:disabled, .is-inactive) {
   background: var(--accent-hover);
 }
 
@@ -41,7 +41,7 @@
   color: var(--color-text);
 }
 
-.btn-secondary:hover:not(:disabled) {
+.btn-secondary:hover:not(:disabled, .is-inactive) {
   background: var(--color-hover);
 }
 
@@ -49,7 +49,7 @@
   color: var(--color-text);
 }
 
-.btn-ghost:hover:not(:disabled) {
+.btn-ghost:hover:not(:disabled, .is-inactive) {
   background: var(--color-hover);
 }
 
@@ -58,8 +58,13 @@
   color: var(--color-text-inverse);
 }
 
-.btn:disabled {
+.btn:disabled,
+.btn.is-inactive {
   opacity: 0.5;
+}
+
+.btn.is-inactive:not([aria-busy="true"]) {
+  cursor: not-allowed;
 }
 
 .btn[aria-busy="true"] {

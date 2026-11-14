@@ -13,14 +13,28 @@ export type Remote<T> =
 /** A long-running terminal operation the card waits for. */
 export type WaitKind = "sign_in" | "sign_out";
 
+/** An action on a tool card. */
+export type ToolAction = "check" | "sign_in" | "sign_out" | "install";
+
 /** Last outcome of an action on a tool, shown on its card until the next action. */
 export type ToolNotice =
   | {
       kind: "error";
-      action: "check" | "sign_in" | "sign_out" | "install";
+      action: ToolAction;
       error: VisionIpcError;
     }
-  | { kind: "timeout"; wait: WaitKind };
+  | { kind: "timeout"; wait: WaitKind }
+  /** The user cancelled the native confirmation (`not_approved`): neutral, not an error. */
+  | { kind: "declined"; action: ToolAction };
+
+/** Views with a polite live region. */
+export type AnnounceScope = "tools" | "mcp" | "profiles";
+
+/** The latest message of a view's live region; `n` changes with every message. */
+export interface Announcement {
+  n: number;
+  text: string;
+}
 
 /** One tool card's state. */
 export interface ToolEntry {
@@ -52,6 +66,8 @@ export interface DataState {
   platform: Platform | null;
   tools: Record<string, ToolsSlot | undefined>;
   mcp: Record<string, Remote<McpServerView[]> | undefined>;
+  /** Latest completion message per view, written into that view's live region. */
+  announce: Partial<Record<AnnounceScope, Announcement>>;
 }
 
 /** Every transition of the data store. */
@@ -69,7 +85,14 @@ export type DataAction =
   | { type: "profile/removed"; profileId: string; nextActiveId: string | null }
   | { type: "profile/active"; profileId: string }
   | { type: "tools/loading"; profileId: string }
-  | { type: "tools/loaded"; profileId: string; views: ToolView[] }
+  | {
+      type: "tools/loaded";
+      profileId: string;
+      views: ToolView[];
+      /** Live activity from the provider's registries (running polls and checks). */
+      waiting: Readonly<Record<string, WaitKind>>;
+      checking: readonly string[];
+    }
   | { type: "tools/failed"; profileId: string; error: VisionIpcError }
   | { type: "tools/autoChecked"; profileId: string }
   | { type: "tools/invalidate" }
@@ -79,13 +102,21 @@ export type DataAction =
       toolId: string;
       patch: Partial<Omit<ToolEntry, "view">>;
     }
+  /** A check result: updates the tool if it is still listed, never adds it. */
   | { type: "tool/view"; profileId: string; view: ToolView }
+  /** A newly saved custom tool, added (or replaced) in the profile's list. */
+  | { type: "tool/added"; profileId: string; view: ToolView }
+  /** The core approved the tool (an explicit action ran it): automatic checks may run. */
+  | { type: "tool/approved"; toolId: string }
   | { type: "tool/removed"; toolId: string }
   | { type: "mcp/loading"; profileId: string }
   | { type: "mcp/loaded"; profileId: string; servers: McpServerView[] }
   | { type: "mcp/failed"; profileId: string; error: VisionIpcError }
-  | { type: "mcp/upsert"; profileId: string; server: McpServerView }
-  | { type: "mcp/removed"; profileId: string; serverId: string };
+  | { type: "mcp/added"; profileId: string; server: McpServerView }
+  /** Replaces a listed server; a server that is no longer listed is not added back. */
+  | { type: "mcp/updated"; profileId: string; server: McpServerView }
+  | { type: "mcp/removed"; profileId: string; serverId: string }
+  | { type: "announce"; scope: AnnounceScope; text: string };
 
 /** Store before bootstrap answered. */
 export const initialDataState: DataState = {
@@ -95,6 +126,7 @@ export const initialDataState: DataState = {
   platform: null,
   tools: {},
   mcp: {},
+  announce: {},
 };
 
 function newEntry(view: ToolView): ToolEntry {
@@ -195,12 +227,13 @@ export function dataReducer(state: DataState, action: DataAction): DataState {
       };
     case "tools/loaded": {
       const previous = state.tools[action.profileId];
-      const old = previous?.list.kind === "ready" ? previous.list.data : [];
-      // Keep per-card activity (a running poll) when the list is reloaded.
-      const data = action.views.map((view) => {
-        const kept = old.find((e) => e.view.spec.id === view.spec.id);
-        return kept ? { ...kept, view } : newEntry(view);
-      });
+      // Per-card activity comes from the provider's live registries, so a sign-in wait or a
+      // running check stays visible after the list was reloaded or invalidated.
+      const data = action.views.map((view) => ({
+        ...newEntry(view),
+        waiting: action.waiting[view.spec.id] ?? null,
+        checking: action.checking.includes(view.spec.id),
+      }));
       return {
         ...state,
         tools: {
@@ -248,10 +281,30 @@ export function dataReducer(state: DataState, action: DataAction): DataState {
       );
     case "tool/view":
       return mapTools(state, action.profileId, (entries) =>
+        entries.map((e) => (e.view.spec.id === action.view.spec.id ? { ...e, view: action.view } : e)),
+      );
+    case "tool/added":
+      return mapTools(state, action.profileId, (entries) =>
         entries.some((e) => e.view.spec.id === action.view.spec.id)
           ? entries.map((e) => (e.view.spec.id === action.view.spec.id ? { ...e, view: action.view } : e))
           : [...entries, newEntry(action.view)],
       );
+    case "tool/approved": {
+      let next = state;
+      for (const id of Object.keys(state.tools)) {
+        next = mapTools(next, id, (entries) =>
+          entries.map((e) =>
+            e.view.spec.id === action.toolId && !e.view.spec.approved
+              ? {
+                  ...e,
+                  view: { ...e.view, spec: { ...e.view.spec, approved: true } },
+                }
+              : e,
+          ),
+        );
+      }
+      return next;
+    }
     case "tool/removed": {
       let next = state;
       for (const id of Object.keys(state.tools)) {
@@ -280,15 +333,30 @@ export function dataReducer(state: DataState, action: DataAction): DataState {
           [action.profileId]: { kind: "error", error: action.error },
         },
       };
-    case "mcp/upsert":
+    case "mcp/added":
       return mapServers(state, action.profileId, (servers) =>
         servers.some((s) => s.id === action.server.id)
           ? servers.map((s) => (s.id === action.server.id ? action.server : s))
           : [...servers, action.server],
       );
+    case "mcp/updated":
+      return mapServers(state, action.profileId, (servers) =>
+        servers.map((s) => (s.id === action.server.id ? action.server : s)),
+      );
     case "mcp/removed":
       return mapServers(state, action.profileId, (servers) =>
         servers.filter((s) => s.id !== action.serverId),
       );
+    case "announce":
+      return {
+        ...state,
+        announce: {
+          ...state.announce,
+          [action.scope]: {
+            n: (state.announce[action.scope]?.n ?? 0) + 1,
+            text: action.text,
+          },
+        },
+      };
   }
 }

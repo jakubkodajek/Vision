@@ -86,6 +86,12 @@
   white-space: nowrap;
 }
 
+/* Long values (commands, URLs, accounts) wrap instead of hiding behind an ellipsis. */
+.is-wrap {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .is-mono {
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
@@ -210,6 +216,7 @@
 }
 
 .inline-warning,
+.inline-note,
 .isolation-note {
   display: flex;
   align-items: flex-start;
@@ -222,7 +229,12 @@
   color: var(--color-warning);
 }
 
+.inline-note {
+  color: var(--color-text);
+}
+
 .inline-warning svg,
+.inline-note svg,
 .isolation-note svg {
   flex: none;
   margin-top: 2px;
@@ -238,18 +250,30 @@
 
 .wait-row {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
   background: var(--accent-soft);
   color: var(--accent-text);
   font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
 }
 
-.wait-row > span {
-  flex: 1;
+.wait-row-text {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.wait-row-text svg {
+  margin-top: 2px;
+}
+
+.wait-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
 }
 
 .card-notice {
@@ -354,6 +378,7 @@
 }
 
 .server-logins,
+.server-sync,
 .server-health-message {
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
@@ -487,8 +512,14 @@
   outline-offset: 2px;
 }
 
-.switch input:disabled + .switch-track {
+.switch input:disabled + .switch-track,
+.switch.is-inactive .switch-track {
   opacity: 0.5;
+}
+
+.switch.is-inactive,
+.switch.is-inactive input {
+  cursor: not-allowed;
 }
 
 .sync-result {
@@ -512,6 +543,16 @@
 
 .sync-group.is-error .sync-heading {
   color: var(--color-danger);
+}
+
+.sync-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  margin-bottom: var(--space-2);
+}
+
+.sync-next {
+  font-weight: var(--font-weight-medium);
 }
 
 /* ---------- Dialogs ---------- */
@@ -775,11 +816,29 @@
   gap: var(--space-2);
 }
 
-.entry-row {
+.entry-row,
+.entry-columns {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto auto;
-  align-items: center;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) 4.5rem 28px;
+  align-items: start;
   gap: var(--space-2);
+}
+
+.entry-columns {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.entry-row > .entry-secret,
+.entry-row > .icon-btn {
+  margin-top: 3px;
+}
+
+.entry-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
 }
 
 .stored-secret {

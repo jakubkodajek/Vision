@@ -10,6 +10,11 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: "sm" | "md";
   /** Shows a spinner, sets aria-busy and blocks clicks. */
   loading?: boolean;
+  /**
+   * Unavailable for now (busy row or card): `aria-disabled` and clicks are ignored, but the
+   * button stays focusable so focus is never thrown to the page when it becomes busy.
+   */
+  inactive?: boolean;
   icon?: ReactNode;
   ref?: Ref<HTMLButtonElement>;
 }
@@ -19,6 +24,7 @@ export function Button({
   variant = "secondary",
   size = "md",
   loading = false,
+  inactive = false,
   icon,
   disabled,
   className,
@@ -30,11 +36,11 @@ export function Button({
     <button
       {...rest}
       type={type}
-      className={cx("btn", `btn-${variant}`, `btn-${size}`, className)}
+      className={cx("btn", `btn-${variant}`, `btn-${size}`, inactive && "is-inactive", className)}
       disabled={disabled ?? false}
-      aria-disabled={loading || undefined}
+      aria-disabled={loading || inactive || undefined}
       aria-busy={loading || undefined}
-      onClick={loading ? undefined : rest.onClick}
+      onClick={loading || inactive ? undefined : rest.onClick}
     >
       {loading ? <Spinner size={14} /> : icon}
       <span>{children}</span>

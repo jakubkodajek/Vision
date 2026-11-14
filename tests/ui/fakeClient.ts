@@ -66,7 +66,14 @@ export function toolView(
 
 /** A profile. */
 export function profile(id: string, name: string, extra: Partial<Profile> = {}): Profile {
-  return { id, name, kind: "work", accent: "teal", created_at: "2026-11-01T00:00:00Z", ...extra };
+  return {
+    id,
+    name,
+    kind: "work",
+    accent: "teal",
+    created_at: "2026-11-01T00:00:00Z",
+    ...extra,
+  };
 }
 
 /** An MCP server view. */
@@ -111,9 +118,22 @@ export class FakeClient implements VisionClient {
   private pending = new Map<Command, Held[]>();
   private counter = 0;
 
-  /** Rejects the next call of `command` (or every call with `always`). */
-  fail(command: Command, code: ErrorCode, message: string, always = false): this {
-    this.failures.set(command, { error: new VisionIpcError(code, message), always });
+  /**
+   * Rejects the next call of `command` (or every call with `always`); `field` and
+   * `entryKey` name the input the core error is about.
+   */
+  fail(
+    command: Command,
+    code: ErrorCode,
+    message: string,
+    always = false,
+    field: string | null = null,
+    entryKey: string | null = null,
+  ): this {
+    this.failures.set(command, {
+      error: new VisionIpcError(code, message, field, entryKey),
+      always,
+    });
     return this;
   }
 
@@ -169,7 +189,10 @@ export class FakeClient implements VisionClient {
         try {
           return { ok: true, value: compute() };
         } catch (e) {
-          return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+          return {
+            ok: false,
+            error: e instanceof Error ? e : new Error(String(e)),
+          };
         }
       };
       const settle = (o: ReturnType<typeof outcome>) => {
@@ -199,7 +222,8 @@ export class FakeClient implements VisionClient {
   /** What the next `appInfo` answers (to test payload validation). */
   appInfoValue: unknown = { name: "Vision", version: "0.1.0" };
 
-  appInfo = () => this.answer("appInfo", undefined, () => this.appInfoValue as { name: string; version: string });
+  appInfo = () =>
+    this.answer("appInfo", undefined, () => this.appInfoValue as { name: string; version: string });
 
   appOpenReleasesPage = () => this.answer("appOpenReleasesPage", undefined, () => null);
 
@@ -213,7 +237,10 @@ export class FakeClient implements VisionClient {
   profileCreate: VisionClient["profileCreate"] = (args) =>
     this.answer("profileCreate", args, () => {
       this.counter += 1;
-      const p = profile(`p_new${String(this.counter)}`, args.name, { kind: args.kind, accent: args.accent });
+      const p = profile(`p_new${String(this.counter)}`, args.name, {
+        kind: args.kind,
+        accent: args.accent,
+      });
       this.profiles.push(p);
       this.tools.set(p.id, []);
       this.servers.set(p.id, []);
@@ -260,7 +287,12 @@ export class FakeClient implements VisionClient {
       if (!current) throw new VisionIpcError("not_found", "Tool not found");
       const queue = this.checkQueue.get(`${args.profile_id}/${args.tool_id}`);
       const next = queue && queue.length > 0 ? queue.shift() : current.status;
-      const view = toolView(current.spec, next ?? { status: "signed_out" }, current.version ?? "1.0.0");
+      // A check that ran means the user allowed the tool's commands.
+      const view = toolView(
+        { ...current.spec, approved: true },
+        next ?? { status: "signed_out" },
+        current.version ?? "1.0.0",
+      );
       list[index] = view;
       return { ...view };
     });
@@ -286,13 +318,21 @@ export class FakeClient implements VisionClient {
         logout: t.logout ?? null,
         status: t.status ?? null,
         description: t.description ?? "",
-        config_env: [{ var: t.config_var, kind: t.config_kind, rel: t.config_kind === "file" ? "config" : "" }],
+        config_env: [
+          {
+            var: t.config_var,
+            kind: t.config_kind,
+            rel: t.config_kind === "file" ? "config" : "",
+          },
+        ],
         approved: false,
       });
       for (const [id, list] of this.tools) {
         this.tools.set(
           id,
-          exists ? list.map((v) => (v.spec.id === t.id ? toolView(spec, null) : v)) : [...list, toolView(spec, null)],
+          exists
+            ? list.map((v) => (v.spec.id === t.id ? toolView(spec, null) : v))
+            : [...list, toolView(spec, null)],
         );
       }
       return spec;
@@ -331,7 +371,11 @@ export class FakeClient implements VisionClient {
                 args: input.transport.args,
                 env: input.transport.env.map(entryView),
               }
-            : { kind: "http", url: input.transport.url, headers: input.transport.headers.map(entryView) },
+            : {
+                kind: "http",
+                url: input.transport.url,
+                headers: input.transport.headers.map(entryView),
+              },
         tool_ids: input.tool_ids,
         enabled: input.enabled,
         synced: old?.synced ?? false,
@@ -412,7 +456,10 @@ export function standardFake(): FakeClient {
         status: "ok",
         message: null,
         tools: [
-          { name: "read_file", description: "Read a file. <img src=x onerror=alert(1)>" },
+          {
+            name: "read_file",
+            description: "Read a file. <img src=x onerror=alert(1)>",
+          },
           { name: "list_directory", description: null },
         ],
         server_name: "fs",

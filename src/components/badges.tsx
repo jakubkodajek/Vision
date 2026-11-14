@@ -1,4 +1,5 @@
 import {
+  CircleAlert,
   CircleCheck,
   CircleDashed,
   CircleHelp,
@@ -6,6 +7,8 @@ import {
   CircleX,
   Download,
   KeyRound,
+  ShieldQuestion,
+  TriangleAlert,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import type { McpHealthStatus, ToolStatus } from "../ipc/bindings";
@@ -37,7 +40,10 @@ export function ToolStatusBadge({ status }: { status: ToolStatus | null }) {
       );
     case "signed_in":
       return (
-        <Badge tone={status.warning ? "warning" : "success"} icon={<CircleCheck {...ICON} />}>
+        <Badge
+          tone={status.warning ? "warning" : "success"}
+          icon={status.warning ? <CircleAlert {...ICON} /> : <CircleCheck {...ICON} />}
+        >
           {label}
         </Badge>
       );
@@ -91,4 +97,17 @@ export function McpHealthBadge({ status }: { status: McpHealthStatus }) {
         </Badge>
       );
   }
+}
+
+/** State of a custom tool that keeps Vision from checking it on its own. */
+export function ToolGateBadge({ kind }: { kind: "approval" | "invalid" }) {
+  return kind === "approval" ? (
+    <Badge tone="neutral" icon={<ShieldQuestion {...ICON} />}>
+      Needs your approval to run
+    </Badge>
+  ) : (
+    <Badge tone="warning" icon={<TriangleAlert {...ICON} />}>
+      Needs changes
+    </Badge>
+  );
 }

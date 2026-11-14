@@ -29,7 +29,11 @@ function withHttpServer(): FakeClient {
   const fake = standardFake();
   fake.servers.get("p_work")?.push(
     server("m_issues", "issues", {
-      transport: { kind: "http", url: "https://mcp.example.com/mcp", headers: [] },
+      transport: {
+        kind: "http",
+        url: "https://mcp.example.com/mcp",
+        headers: [],
+      },
       health: {
         status: "needs_auth",
         message: "The server asks for authorization",
@@ -54,17 +58,26 @@ describe("server list", () => {
 
   it("lists_the_tools_when_expanded", async () => {
     await openMcp(standardFake());
-    fireEvent.click(within(card("filesystem")).getByRole("button", { name: "Show tools (2)" }));
-    expect(within(card("filesystem")).getByText("list_directory")).toBeVisible();
-    expect(within(card("filesystem")).getByRole("button", { name: "Hide tools (2)" })).toHaveAttribute(
-      "aria-expanded",
-      "true",
+    fireEvent.click(
+      within(card("filesystem")).getByRole("button", {
+        name: "Show tools (2)",
+      }),
     );
+    expect(within(card("filesystem")).getByText("list_directory")).toBeVisible();
+    expect(
+      within(card("filesystem")).getByRole("button", {
+        name: "Hide tools (2)",
+      }),
+    ).toHaveAttribute("aria-expanded", "true");
   });
 
   it("renders_tool_descriptions_as_plain_text", async () => {
     await openMcp(standardFake());
-    fireEvent.click(within(card("filesystem")).getByRole("button", { name: "Show tools (2)" }));
+    fireEvent.click(
+      within(card("filesystem")).getByRole("button", {
+        name: "Show tools (2)",
+      }),
+    );
     expect(within(card("filesystem")).getByText("Read a file. <img src=x onerror=alert(1)>")).toBeVisible();
     expect(card("filesystem").querySelector("img")).toBeNull();
   });
@@ -92,15 +105,21 @@ describe("add server", () => {
   it("adds_a_stdio_server_with_a_secret_variable", async () => {
     const fake = standardFake();
     const dialog = await openAdd(fake);
-    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "github" } });
+    fireEvent.change(within(dialog).getByLabelText("Name"), {
+      target: { value: "github" },
+    });
     fireEvent.change(within(dialog).getByLabelText("Command", { exact: true }), { target: { value: "npx" } });
     fireEvent.change(within(dialog).getByLabelText(/^Arguments/), {
       target: { value: "-y\n@github/mcp" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Add variable" }));
-    fireEvent.change(within(dialog).getByLabelText("Variable 1 name"), { target: { value: "GH_TOKEN" } });
+    fireEvent.change(within(dialog).getByLabelText("Variable 1 name"), {
+      target: { value: "GH_TOKEN" },
+    });
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "Variable 1 is secret" }));
-    fireEvent.change(within(dialog).getByLabelText("Variable 1 value"), { target: { value: "ghp_x" } });
+    fireEvent.change(within(dialog).getByLabelText("Variable 1 value"), {
+      target: { value: "ghp_x" },
+    });
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "Claude Code" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Add server" }));
     expect(await settled(findCard("github"))).toBeInTheDocument();
@@ -132,9 +151,13 @@ describe("add server", () => {
   it("adds_an_http_server", async () => {
     const fake = standardFake();
     const dialog = await openAdd(fake);
-    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "issues" } });
+    fireEvent.change(within(dialog).getByLabelText("Name"), {
+      target: { value: "issues" },
+    });
     fireEvent.click(within(dialog).getByRole("radio", { name: "Remote (HTTP)" }));
-    fireEvent.change(within(dialog).getByLabelText("URL"), { target: { value: "https://mcp.example.com" } });
+    fireEvent.change(within(dialog).getByLabelText("URL"), {
+      target: { value: "https://mcp.example.com" },
+    });
     fireEvent.click(within(dialog).getByRole("button", { name: "Add server" }));
     expect(await settled(findCard("issues"))).toBeInTheDocument();
     expect(fake.calls("mcpSave")).toEqual([
@@ -142,7 +165,11 @@ describe("add server", () => {
         profile_id: "p_work",
         server: {
           name: "issues",
-          transport: { kind: "http", url: "https://mcp.example.com", headers: [] },
+          transport: {
+            kind: "http",
+            url: "https://mcp.example.com",
+            headers: [],
+          },
           tool_ids: [],
           enabled: true,
         },
@@ -161,15 +188,25 @@ describe("add server", () => {
   it("rejects_plain_http_for_a_remote_host", async () => {
     const dialog = await openAdd(standardFake());
     fireEvent.click(within(dialog).getByRole("radio", { name: "Remote (HTTP)" }));
-    fireEvent.change(within(dialog).getByLabelText("URL"), { target: { value: "http://example.com" } });
+    fireEvent.change(within(dialog).getByLabelText("URL"), {
+      target: { value: "http://example.com" },
+    });
     fireEvent.click(within(dialog).getByRole("button", { name: "Add server" }));
     expect(within(dialog).getByLabelText("URL")).toHaveAccessibleDescription(/only allowed for localhost/);
   });
 
   it("shows_a_name_conflict_under_the_name_field", async () => {
-    const fake = standardFake().fail("mcpSave", "conflict", "A server with this name already exists");
+    const fake = standardFake().fail(
+      "mcpSave",
+      "conflict",
+      "A server with this name already exists",
+      false,
+      "name",
+    );
     const dialog = await openAdd(fake);
-    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "filesystem" } });
+    fireEvent.change(within(dialog).getByLabelText("Name"), {
+      target: { value: "filesystem" },
+    });
     fireEvent.change(within(dialog).getByLabelText("Command", { exact: true }), { target: { value: "npx" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Add server" }));
     await settled(within(dialog).findByText("A server with this name already exists"));
@@ -181,7 +218,9 @@ describe("add server", () => {
   it("explains_secret_store_unavailable", async () => {
     const fake = standardFake().fail("mcpSave", "secret_store_unavailable", "No keyring");
     const dialog = await openAdd(fake);
-    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "github" } });
+    fireEvent.change(within(dialog).getByLabelText("Name"), {
+      target: { value: "github" },
+    });
     fireEvent.change(within(dialog).getByLabelText("Command", { exact: true }), { target: { value: "npx" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Add server" }));
     const alert = await settled(within(dialog).findByRole("alert"));
@@ -222,14 +261,22 @@ describe("edit server", () => {
     const fake = standardFake();
     const dialog = await openEdit(fake);
     fireEvent.click(within(dialog).getByRole("button", { name: "Replace API_TOKEN" }));
-    fireEvent.change(within(dialog).getByLabelText("Variable 2 value"), { target: { value: "new-token" } });
+    fireEvent.change(within(dialog).getByLabelText("Variable 2 value"), {
+      target: { value: "new-token" },
+    });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
     await settled(findCard("filesystem"));
     expect(fake.calls("mcpSave")).toMatchObject([
       {
         server: {
           transport: {
-            env: [{ key: "LOG_LEVEL" }, { key: "API_TOKEN", value: { kind: "secret", value: "new-token" } }],
+            env: [
+              { key: "LOG_LEVEL" },
+              {
+                key: "API_TOKEN",
+                value: { kind: "secret", value: "new-token" },
+              },
+            ],
           },
         },
       },
@@ -242,7 +289,7 @@ describe("server actions", () => {
     const fake = standardFake().hold("mcpTest");
     await openMcp(fake);
     fireEvent.click(within(card("filesystem")).getByRole("button", { name: "Test" }));
-    expect(within(card("filesystem")).getByRole("status")).toHaveTextContent("Testing…");
+    expect(within(card("filesystem")).getByText("Testing…")).toBeInTheDocument();
   });
 
   it("shows_the_test_result", async () => {
@@ -277,7 +324,10 @@ describe("server actions", () => {
     fireEvent.click(within(card("filesystem")).getByRole("switch"));
     await settled(Promise.resolve());
     expect(within(card("filesystem")).getByRole("switch")).not.toBeChecked();
-    expect(fake.calls("mcpSave")).toMatchObject([{ server: { id: "m_files", enabled: false } }]);
+    expect(fake.calls("mcpSetEnabled")).toEqual([
+      { profile_id: "p_work", server_id: "m_files", enabled: false },
+    ]);
+    expect(fake.calls("mcpSave")).toHaveLength(0);
   });
 
   it("deletes_a_server_after_confirmation", async () => {
@@ -297,7 +347,9 @@ describe("server actions", () => {
     const fake = standardFake().fail("mcpDelete", "io", "Disk full");
     await openMcp(fake);
     fireEvent.click(screen.getByRole("button", { name: "Delete filesystem" }));
-    const dialog = screen.getByRole("alertdialog", { name: "Delete filesystem?" });
+    const dialog = screen.getByRole("alertdialog", {
+      name: "Delete filesystem?",
+    });
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete server" }));
     expect(await settled(within(dialog).findByRole("alert"))).toHaveTextContent("Disk full");
     expect(card("filesystem")).toBeInTheDocument();
@@ -321,13 +373,13 @@ describe("server actions", () => {
 });
 
 describe("sync to Claude Code", () => {
-  it("warns_that_secret_values_are_written_before_syncing", async () => {
+  it("explains_that_servers_with_secret_values_are_not_synced", async () => {
     const fake = standardFake();
     await openMcp(fake);
     fireEvent.click(screen.getByRole("button", { name: "Sync to Claude Code" }));
     const dialog = screen.getByRole("dialog", { name: "Sync to Claude Code" });
     expect(
-      within(dialog).getByText(/Secret values are written into that Claude Code configuration/),
+      within(dialog).getByText(/Servers with secret values are not synced, because Claude Code would store/),
     ).toBeVisible();
     expect(fake.calls("mcpSyncClaude")).toHaveLength(0);
   });
