@@ -9,6 +9,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::ipc::{IpcError, IpcResult};
 use crate::process::{CommandRunner, CommandSpec};
 
 /// An environment as an ordered list of variables.
@@ -42,6 +43,13 @@ pub const ALLOWED_VARS: &[&str] = &[
     "PATHEXT",
     "TEMP",
     "TMP",
+    // Desktop session (pure passthrough) so a sign-in started in a Linux terminal can open
+    // the browser.
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "XAUTHORITY",
 ];
 
 /// Returns whether a parent variable may pass. `case_insensitive` mirrors Windows rules.
@@ -58,16 +66,21 @@ pub fn is_allowed(name: &str, case_insensitive: bool) -> bool {
 }
 
 /// Builds an environment: allowlisted parent variables, `PATH` = `path`, then `extra`
-/// (tool config variables, MCP server variables), which override earlier entries.
+/// (tool config variables, MCP server variables). An `extra` entry may replace an
+/// allowlisted parent value, but never an earlier `extra` entry: two tools (or a tool and a
+/// server) claiming the same variable is an error, so one can never silently redirect
+/// another's login.
 ///
 /// Pure function; `case_insensitive` should be `cfg!(windows)`.
-#[must_use]
+///
+/// # Errors
+/// `invalid_input` naming the variable when `extra` sets one twice.
 pub fn build_env_with(
     parent: &[(OsString, OsString)],
     path: &OsStr,
     extra: &[(OsString, OsString)],
     case_insensitive: bool,
-) -> EnvVars {
+) -> IpcResult<EnvVars> {
     let key = |k: &OsStr| -> String {
         let s = k.to_string_lossy().into_owned();
         if case_insensitive {
@@ -92,19 +105,28 @@ pub fn build_env_with(
         }
     }
     push(OsStr::new("PATH"), path, &mut out);
+    let mut claimed = BTreeSet::new();
     for (k, v) in extra {
+        if !claimed.insert(key(k)) {
+            return Err(IpcError::invalid_input(format!(
+                "The variable {} is set twice (by two tools, or by a tool and a server)",
+                k.to_string_lossy()
+            )));
+        }
         push(k, v, &mut out);
     }
-    out
+    Ok(out)
 }
 
 /// [`build_env_with`] using the current platform's case rules.
-#[must_use]
+///
+/// # Errors
+/// See [`build_env_with`].
 pub fn build_env(
     parent: &[(OsString, OsString)],
     path: &OsStr,
     extra: &[(OsString, OsString)],
-) -> EnvVars {
+) -> IpcResult<EnvVars> {
     build_env_with(parent, path, extra, cfg!(windows))
 }
 
@@ -162,34 +184,53 @@ pub fn well_known_dirs(home: Option<&Path>) -> Vec<PathBuf> {
     v
 }
 
-/// Appends the existing directories from `extra` to `base`, removing duplicates.
+/// Appends the existing directories from `extra` to `base`, removing duplicates. Empty and
+/// relative entries (`.`, `bin`) are dropped: they would make children resolve programs from
+/// whatever their working directory is.
 #[must_use]
 pub fn join_path(base: &OsStr, extra: &[PathBuf]) -> OsString {
     let mut seen = BTreeSet::new();
     let mut dirs: Vec<PathBuf> = Vec::new();
     for d in std::env::split_paths(base).chain(extra.iter().filter(|d| d.is_dir()).cloned()) {
-        if d.as_os_str().is_empty() {
+        if d.as_os_str().is_empty() || !d.is_absolute() {
             continue;
         }
         if seen.insert(d.clone()) {
             dirs.push(d);
         }
     }
-    std::env::join_paths(dirs).unwrap_or_else(|_| base.to_owned())
+    std::env::join_paths(dirs).unwrap_or_default()
+}
+
+/// Flags tried in order to ask `shell` for its `PATH`: interactive login (`-ilc`), login
+/// (`-lc`), then plain (`-c`). `csh`/`tcsh` cannot combine those flags, so they get `-c`
+/// only.
+#[must_use]
+pub fn shell_probe_flags(shell: &Path) -> &'static [&'static str] {
+    let name = shell
+        .file_name()
+        .map(|n| n.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    if matches!(name.as_str(), "csh" | "tcsh") {
+        &["-c"]
+    } else {
+        &["-ilc", "-lc", "-c"]
+    }
 }
 
 /// Resolves the `PATH` for child processes.
 ///
-/// On Unix this asks the user's login shell (`$SHELL -ilc`, 5 s timeout) and appends the
-/// well-known directories that exist; any failure falls back to the parent `PATH` plus those
-/// directories. On Windows the parent `PATH` is used unchanged.
+/// On Unix this asks the user's login shell (`$SHELL -ilc`, then `-lc`, then `-c` when an
+/// attempt fails or prints no markers; 5 s timeout each) and appends the well-known
+/// directories that exist; if every attempt fails it falls back to the parent `PATH` plus
+/// those directories. On Windows the parent `PATH` is used. Relative entries are dropped.
 #[must_use]
 pub fn resolve_path(runner: &dyn CommandRunner, parent: &[(OsString, OsString)]) -> OsString {
     let parent_path = lookup(parent, "PATH")
         .map(OsStr::to_owned)
         .unwrap_or_default();
     if cfg!(windows) {
-        return parent_path;
+        return join_path(&parent_path, &[]);
     }
     let home = lookup(parent, "HOME").map(PathBuf::from);
     let extra = well_known_dirs(home.as_deref());
@@ -197,23 +238,24 @@ pub fn resolve_path(runner: &dyn CommandRunner, parent: &[(OsString, OsString)])
         .map(PathBuf::from)
         .filter(|p| p.is_absolute() && p.is_file())
         .unwrap_or_else(|| PathBuf::from("/bin/sh"));
-    let spec = CommandSpec {
-        program: shell,
-        args: vec![
-            OsString::from("-ilc"),
-            OsString::from(format!("printf '{MARK_START}%s{MARK_END}' \"$PATH\"")),
-        ],
-        // The user's own shell reads its own configuration with the user's environment.
-        env: parent.to_vec(),
-        cwd: home.filter(|h| h.is_dir()),
-        timeout: Duration::from_secs(5),
-        max_output_bytes: 256 * 1024,
-    };
-    let from_shell = runner
-        .run(&spec)
-        .ok()
-        .filter(|o| !o.timed_out)
-        .and_then(|o| parse_marked_path(&String::from_utf8_lossy(&o.stdout)));
+    let cwd = home.filter(|h| h.is_dir());
+    let script = format!("printf '{MARK_START}%s{MARK_END}' \"$PATH\"");
+    let from_shell = shell_probe_flags(&shell).iter().find_map(|flag| {
+        let spec = CommandSpec {
+            program: shell.clone(),
+            args: vec![OsString::from(flag), OsString::from(&script)],
+            // The user's own shell reads its own configuration with the user's environment.
+            env: parent.to_vec(),
+            cwd: cwd.clone(),
+            timeout: Duration::from_secs(5),
+            max_output_bytes: 256 * 1024,
+        };
+        runner
+            .run(&spec)
+            .ok()
+            .filter(|o| !o.timed_out)
+            .and_then(|o| parse_marked_path(&String::from_utf8_lossy(&o.stdout)))
+    });
     match from_shell {
         Some(p) => join_path(OsStr::new(&p), &extra),
         None => join_path(&parent_path, &extra),

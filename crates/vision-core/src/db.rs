@@ -30,6 +30,22 @@ pub const APP_MIGRATIONS: &[&str] = &[
         spec_json TEXT NOT NULL,
         created_at TEXT NOT NULL
     );",
+    // v3: approvals of user-defined commands (fingerprint of the exact definition), and an
+    // index of credential-store accounts per profile so a profile's secrets can be deleted
+    // without reading its profile.db.
+    "CREATE TABLE approvals (
+        kind TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        profile_id TEXT NOT NULL DEFAULT '',
+        hash TEXT NOT NULL,
+        approved_at TEXT NOT NULL,
+        PRIMARY KEY (kind, subject, profile_id)
+    );
+    CREATE TABLE secret_index (
+        account TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL
+    );
+    CREATE INDEX secret_index_profile ON secret_index (profile_id);",
 ];
 
 /// Migrations of `profile.db`.
@@ -58,6 +74,9 @@ pub const PROFILE_MIGRATIONS: &[&str] = &[
         updated_at TEXT NOT NULL
     );
     CREATE TABLE mcp_managed (name TEXT PRIMARY KEY);",
+    // v2: a revision per server, bumped by every edit, so a health check that finishes after
+    // an edit or delete never writes back over it.
+    "ALTER TABLE mcp_servers ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;",
 ];
 
 /// One SQLite connection guarded by a mutex; the core is the only writer.

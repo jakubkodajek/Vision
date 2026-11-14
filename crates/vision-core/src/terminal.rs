@@ -258,6 +258,80 @@ fn spawn_detached(mut cmd: Command) -> std::io::Result<()> {
     Ok(())
 }
 
+/// `CREATE_NEW_CONSOLE` process creation flag (Win32 `CreateProcessW`).
+pub const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+
+/// How a launch script is started on Windows (SEC-5): `cmd.exe /d /k ""<script>""` in a new
+/// console, with no `start` and no further command-line parsing of the path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowsLaunch {
+    /// `<SystemRoot>\System32\cmd.exe`.
+    pub program: PathBuf,
+    /// Arguments quoted normally (`/d`, `/k`).
+    pub args: Vec<String>,
+    /// The final command-line text, appended verbatim (`raw_arg`): the script path wrapped in
+    /// two pairs of double quotes, the form `cmd /k` strips back to exactly one quoted path.
+    pub raw_tail: String,
+    /// Process creation flags.
+    pub creation_flags: u32,
+}
+
+/// Characters that `cmd.exe` interprets even inside the quoted script path.
+pub const CMD_UNSAFE_PATH_CHARS: &[char] = &['"', '%', '^', '&', '!', '|', '<', '>'];
+
+/// Builds the Windows terminal command for `script` (pure, compiled on every OS for tests).
+///
+/// # Errors
+/// `terminal_unavailable` when the script path is not UTF-8 or contains a character in
+/// [`CMD_UNSAFE_PATH_CHARS`] or a control character (the data root is under such a path).
+pub fn windows_terminal_command(system_root: &Path, script: &Path) -> IpcResult<WindowsLaunch> {
+    let path = script.to_str().ok_or_else(|| {
+        terminal_unavailable("The launch script path is not valid UTF-8, so cmd.exe cannot run it")
+    })?;
+    if path.contains(CMD_UNSAFE_PATH_CHARS) || path.chars().any(char::is_control) {
+        return Err(terminal_unavailable(
+            "The Vision data folder path contains characters cmd.exe treats specially (\" % ^ & ! | < >), so the terminal cannot be opened safely",
+        ));
+    }
+    Ok(WindowsLaunch {
+        program: system_root.join("System32").join("cmd.exe"),
+        args: vec!["/d".to_owned(), "/k".to_owned()],
+        raw_tail: format!("\"\"{path}\"\""),
+        creation_flags: CREATE_NEW_CONSOLE,
+    })
+}
+
+/// Starts `plan` in a new console window. Standard handles are inherited (not redirected),
+/// so the new console's own input and output are used.
+#[cfg(windows)]
+fn spawn_windows_console(
+    plan: &WindowsLaunch,
+    env: &[(OsString, OsString)],
+) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    let mut c = Command::new(&plan.program);
+    c.args(&plan.args)
+        .raw_arg(&plan.raw_tail)
+        .creation_flags(plan.creation_flags);
+    c.env_clear().envs(env.iter().map(|(k, v)| (k, v)));
+    let mut child = c.spawn()?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn spawn_windows_console(
+    _plan: &WindowsLaunch,
+    _env: &[(OsString, OsString)],
+) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "Windows consoles exist only on Windows",
+    ))
+}
+
 /// The real system terminal: macOS Terminal.app, the first available Linux emulator, or a
 /// new Windows console.
 #[derive(Debug, Clone)]
@@ -287,10 +361,8 @@ impl TerminalLauncher for SystemTerminalLauncher {
         } else if cfg!(windows) {
             let system_root = lookup(env, "SystemRoot")
                 .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
-            let mut c = Command::new(system_root.join("System32").join("cmd.exe"));
-            c.arg("/d").arg("/c").arg("start").arg("Vision").arg(script);
-            c.env_clear().envs(env.iter().map(|(k, v)| (k, v)));
-            spawn_detached(c).map_err(fail)
+            let plan = windows_terminal_command(&system_root, script)?;
+            spawn_windows_console(&plan, env).map_err(fail)
         } else {
             let path = lookup(&self.gui_env, "PATH")
                 .map(OsString::from)

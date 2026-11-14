@@ -71,6 +71,7 @@ const ERROR_CODES: readonly ErrorCode[] = [
   "schema_too_new",
   "secret_store_unavailable",
   "terminal_unavailable",
+  "not_approved",
   "internal",
 ];
 
@@ -187,7 +188,9 @@ export function toolsList(args: ProfileScopeArgs): Promise<ToolView[]> {
 
 /**
  * Detects the binary and runs the tool's status command (up to 20 s). Poll this after
- * {@link toolSignIn} to detect when the sign-in completes.
+ * {@link toolSignIn} to detect when the sign-in completes. A custom tool first asks for
+ * confirmation in a native dialog (once per definition); rejects with `not_approved` when
+ * the user cancels, and `invalid_input` for a stored tool marked `invalid`.
  */
 export function toolCheck(args: ToolArgs): Promise<ToolView> {
   return call<ToolView>("tool_check", args);
@@ -196,7 +199,7 @@ export function toolCheck(args: ToolArgs): Promise<ToolView> {
 /**
  * Opens the system terminal running the tool's sign-in command with the profile
  * environment. Resolves once the terminal is opened, not when sign-in finishes.
- * Rejects with `not_installed` or `terminal_unavailable`.
+ * Rejects with `not_installed`, `terminal_unavailable` or (custom tools) `not_approved`.
  */
 export function toolSignIn(args: ToolArgs): Promise<null> {
   return call<null>("tool_sign_in", args);
@@ -231,8 +234,10 @@ export function mcpList(args: ProfileScopeArgs): Promise<McpServerView[]> {
 
 /**
  * Creates (no `server.id`) or updates an MCP server. A secret entry without `value` keeps
- * the stored value. Health resets to `untested`. Rejects with `invalid_input`, `conflict`,
- * `not_found` or `secret_store_unavailable` (then nothing was saved).
+ * the stored value, unless the destination changed (transport, HTTP origin, stdio command
+ * or arguments): then every secret must be entered again (`invalid_input`). Health resets
+ * to `untested`. Rejects with `invalid_input`, `conflict`, `not_found` or
+ * `secret_store_unavailable` (then nothing was saved).
  */
 export function mcpSave(args: McpSaveArgs): Promise<McpServerView> {
   return call<McpServerView>("mcp_save", args);
@@ -245,7 +250,10 @@ export function mcpDelete(args: McpServerArgs): Promise<null> {
 
 /**
  * Health-checks a server (initialize + tools/list, up to 20 s). Problems with the server
- * itself are reported in `health` (`error`, `needs_auth`), not as a rejection.
+ * itself are reported in `health` (`error`, `needs_auth`), not as a rejection. A stdio
+ * server is started only after a native confirmation (once per definition); rejects with
+ * `not_approved` when the user cancels. If the server was edited during the check, the
+ * current server is returned with `untested` health.
  */
 export function mcpTest(args: McpServerArgs): Promise<McpServerView> {
   return call<McpServerView>("mcp_test", args);
@@ -253,8 +261,8 @@ export function mcpTest(args: McpServerArgs): Promise<McpServerView> {
 
 /**
  * Writes the profile's enabled servers into its Claude Code user scope and removes servers
- * Vision synced earlier that are now disabled or deleted. Secret values are written into
- * that profile's Claude Code configuration. Rejects with `not_installed` without Claude Code.
+ * Vision synced earlier that are now disabled or deleted. Servers with secret values are
+ * never synced and are listed in `skipped`. Rejects with `not_installed` without Claude Code.
  */
 export function mcpSyncClaude(args: ProfileScopeArgs): Promise<SyncReport> {
   return call<SyncReport>("mcp_sync_claude", args);

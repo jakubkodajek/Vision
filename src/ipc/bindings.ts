@@ -4,7 +4,7 @@
 /**
  * Machine-readable error category returned by every command.
  */
-export type ErrorCode = "invalid_input" | "not_found" | "conflict" | "not_installed" | "timeout" | "io" | "schema_too_new" | "secret_store_unavailable" | "terminal_unavailable" | "internal";
+export type ErrorCode = "invalid_input" | "not_found" | "conflict" | "not_installed" | "timeout" | "io" | "schema_too_new" | "secret_store_unavailable" | "terminal_unavailable" | "not_approved" | "internal";
 
 /**
  * Error returned by every command. `message` is safe to show to the user: it never
@@ -95,7 +95,9 @@ created_at: string, };
  */
 export type ProfileCreateArgs = { 
 /**
- * Name: trimmed, 1 to 40 characters, no control characters.
+ * Name: trimmed and NFC-normalised; 1 to 40 characters after normalisation; no
+ * control, zero-width or text-direction characters; at least one visible character.
+ * Unique ignoring case and Unicode compatibility forms (NFKC + lower-case).
  */
 name: string, 
 /**
@@ -137,7 +139,8 @@ export type ProfileDeleteArgs = {
  */
 id: string, 
 /**
- * Must equal the profile's name exactly.
+ * Must equal the profile's name exactly (both compared in NFC form, so a name typed on
+ * any keyboard matches; case matters).
  */
 confirm_name: string, };
 
@@ -243,7 +246,14 @@ isolation: Isolation,
 /**
  * `true` for presets, `false` for custom tools.
  */
-builtin: boolean, };
+builtin: boolean, 
+/**
+ * Set only for a stored custom tool that no longer passes validation (for example its
+ * config variable is now reserved): the reason, to show instead of the isolation note.
+ * Such a tool is listed but cannot be checked, signed in or out, and its variable is not
+ * exported, until it is edited and saved again. Always `null` for valid tools.
+ */
+invalid: string | null, };
 
 /**
  * Sign-in status of a tool in a profile.
@@ -318,7 +328,7 @@ export type CustomToolInput = {
  */
 id: string, 
 /**
- * Display name, 1 to 40 characters.
+ * Display name, 1 to 40 characters (same text rules as profile names).
  */
 name: string, 
 /**
@@ -326,7 +336,8 @@ name: string,
  */
 description?: string, 
 /**
- * Binary name: no path separators or shell metacharacters.
+ * Binary name: no path separators or shell metacharacters, and not a shell or script
+ * interpreter (`sh`, `bash`, `python3`, `node`, `env`, `powershell`, `cmd`, ...).
  */
 binary: string, 
 /**
@@ -334,7 +345,12 @@ binary: string,
  */
 install_url?: string, 
 /**
- * Config variable name, `^[A-Z_][A-Z0-9_]{0,63}$`.
+ * Config variable name: `^[A-Z][A-Z0-9_]{0,47}$` ending in `_CONFIG_DIR`,
+ * `_CONFIG_HOME`, `_HOME`, `_CONFIG`, `_CONFIG_FILE` or `_DIR`; not a variable of a
+ * built-in or another custom tool, not an allowlisted base variable, and not in the
+ * families `XDG_*`, `GIT_*`, `PYTHON*`, `NODE_*`, `NPM_*`, `LD_*`, `DYLD_*`,
+ * `ANTHROPIC_*`, `CLAUDE_*`, `OPENAI_*`, `CODEX_*`, `GH_*`, `GITHUB_*`, `AWS_*`,
+ * `AZURE_*`, `CLOUDSDK_*`, `GOOGLE_*`, `SSH_*`, nor `ZDOTDIR` or `HOME`.
  */
 config_var: string, 
 /**
@@ -606,6 +622,20 @@ name: string,
 message: string, };
 
 /**
+ * A server that was deliberately not synced.
+ */
+export type SyncSkip = { 
+/**
+ * Server name.
+ */
+name: string, 
+/**
+ * User-safe reason (for example: it has secret values, which are never put on a
+ * command line).
+ */
+reason: string, };
+
+/**
  * Result of `mcp_sync_claude`.
  */
 export type SyncReport = { 
@@ -614,10 +644,17 @@ export type SyncReport = {
  */
 synced: Array<string>, 
 /**
- * Vision-managed names removed (deleted or disabled servers).
+ * Vision-managed names removed (deleted or disabled servers, or servers now skipped).
  */
 removed: Array<string>, 
 /**
- * Names that failed.
+ * Names that failed, including a name that already exists in Claude Code but was not
+ * created by Vision (reported, never removed). A failed remove keeps the name tracked so
+ * the next sync retries it.
  */
-failed: Array<SyncFailure>, };
+failed: Array<SyncFailure>, 
+/**
+ * Enabled servers that were not synced, with the reason. Servers with any secret env or
+ * header value are always skipped.
+ */
+skipped: Array<SyncSkip>, };

@@ -64,3 +64,9 @@ Template:
 - Tests: fake CLI / fake MCP server binary `crates/vision-core/tests/bin/fake.rs`; AC1-AC11 covered by `crates/vision-core/tests/*.rs`, `src-tauri/src/lib.rs` tests, `tests/ipc/client.test.ts`, `tests/config/tauri-config.test.ts`.
 - Not verified live: real CLI output formats (codex, gh text, aws) beyond the documented shapes; Windows/macOS builds (only Linux here); real terminal launch and keychain.
 - Next: UI agent builds on `src/ipc/client.ts` (spec §3).
+
+## 2026-11-14 - real-app review fixes (Rust core)
+- Done: SEC-1..9, BUG-1..14 and the suspected items from the security review and bug hunt (`.work/real-app/security/`, `.work/real-app/bughunt/`): native confirmation of custom tools and stdio MCP servers (`approvals.rs`, `ErrorCode::NotApproved`), sync skips servers with secrets and never removes unmanaged names, secrets re-entered when the destination changes, config variable allowlist, `cmd.exe /d /k` terminal launch, per-profile gate and revision-checked health writes, secret index in app.db, startup orphan cleanup, runner with shared buffer and 250 ms pipe grace, probe robustness, Unicode name hygiene, single instance.
+- Tests: new `tests/approvals.rs`, `tests/config_vars.rs`, `tests/process_runner.rs`; regression tests appended to the existing suites; repro behaviours ported into the Rust fake (no Python).
+- Not verified live: Windows terminal launch (new console with inherited handles), the dialog's default button (the plugin does not expose it), macOS and Windows test runs (CI step added).
+- Next: UI agent shows `not_approved`, `SyncReport.skipped` and `ToolSpecView.invalid`.

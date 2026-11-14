@@ -106,6 +106,14 @@ jobs:
 
       - run: npm ci
 
+      # The Rust suite on each OS the installer is built for, before bundling: the Linux
+      # check job alone cannot catch macOS- or Windows-only failures (process groups, Job
+      # Objects, PATH rules). macos-x86_64 is cross-compiled on an Apple Silicon runner, so
+      # its test binaries cannot run there.
+      - name: Rust tests (native target)
+        if: matrix.name != 'macos-x86_64'
+        run: cargo test --workspace --locked
+
       - name: Build HiDPI DMG background
         if: runner.os == 'macOS'
         run: |

@@ -6,12 +6,14 @@
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::Value;
+use vision_core::approvals::Confirmer;
 use vision_core::ipc::{Accent, IpcResult, Profile, ProfileCreateArgs, ProfileKind};
-use vision_core::mcp::SpecMcpProbe;
+use vision_core::mcp::{McpProbe, SpecMcpProbe};
 use vision_core::process::{CommandOutput, CommandRunner, CommandSpec, SystemCommandRunner};
 use vision_core::secrets::MemorySecretStore;
 use vision_core::terminal::{TerminalLauncher, UrlOpener};
@@ -79,6 +81,44 @@ impl CommandRunner for RecordingRunner {
     }
 }
 
+/// A prompt shown by [`FakeConfirmer`].
+#[derive(Debug, Clone)]
+pub struct Prompt {
+    pub title: String,
+    pub message: String,
+}
+
+/// Records confirmation prompts; approves unless told to decline.
+#[derive(Debug, Default)]
+pub struct FakeConfirmer {
+    pub prompts: Mutex<Vec<Prompt>>,
+    pub decline: AtomicBool,
+}
+
+impl FakeConfirmer {
+    pub fn set_decline(&self, decline: bool) {
+        self.decline.store(decline, Ordering::SeqCst);
+    }
+
+    pub fn count(&self) -> usize {
+        self.prompts.lock().unwrap().len()
+    }
+
+    pub fn last(&self) -> Option<Prompt> {
+        self.prompts.lock().unwrap().last().cloned()
+    }
+}
+
+impl Confirmer for FakeConfirmer {
+    fn confirm(&self, title: &str, message: &str) -> bool {
+        self.prompts.lock().unwrap().push(Prompt {
+            title: title.to_owned(),
+            message: message.to_owned(),
+        });
+        !self.decline.load(Ordering::SeqCst)
+    }
+}
+
 /// One test's sandbox.
 pub struct Harness {
     pub dir: tempfile::TempDir,
@@ -86,6 +126,8 @@ pub struct Harness {
     pub opener: Arc<FakeOpener>,
     pub secrets: Arc<MemorySecretStore>,
     pub runner: Arc<dyn CommandRunner>,
+    pub confirmer: Arc<FakeConfirmer>,
+    pub probe: Arc<dyn McpProbe>,
     pub timeouts: Timeouts,
 }
 
@@ -105,6 +147,8 @@ impl Harness {
             opener: Arc::new(FakeOpener::default()),
             secrets: Arc::new(MemorySecretStore::new()),
             runner: Arc::new(SystemCommandRunner),
+            confirmer: Arc::new(FakeConfirmer::default()),
+            probe: Arc::new(SpecMcpProbe),
             timeouts: Timeouts {
                 status: Duration::from_secs(5),
                 version: Duration::from_secs(5),
@@ -155,7 +199,8 @@ impl Harness {
             terminal: self.terminal.clone(),
             opener: self.opener.clone(),
             secrets: self.secrets.clone(),
-            probe: Arc::new(SpecMcpProbe),
+            probe: Arc::clone(&self.probe),
+            confirmer: self.confirmer.clone(),
             parent_env: self.parent_env(),
             path: PathSource::Fixed(self.bin_dir().into()),
             timeouts: self.timeouts,

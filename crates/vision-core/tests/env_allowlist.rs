@@ -105,7 +105,7 @@ fn builder_keeps_allowlisted_drops_others_and_sets_path() {
         ("GH_TOKEN", "y"),
         ("LC_TIME", "C"),
     ]);
-    let env = build_env_with(&parent, OsStr::new("/resolved/bin"), &[], false);
+    let env = build_env_with(&parent, OsStr::new("/resolved/bin"), &[], false).unwrap();
     assert_eq!(names(&env), vec!["HOME", "LC_TIME", "PATH"]);
     assert_eq!(env[2].1, OsString::from("/resolved/bin"));
 }
@@ -114,7 +114,7 @@ fn builder_keeps_allowlisted_drops_others_and_sets_path() {
 fn builder_extra_variables_override_parent_values() {
     let parent = env_of(&[("HOME", "/h"), ("CLAUDE_CONFIG_DIR", "/parent/claude")]);
     let extra = env_of(&[("CLAUDE_CONFIG_DIR", "/profile/claude"), ("HOME", "/other")]);
-    let env = build_env_with(&parent, OsStr::new("/bin"), &extra, false);
+    let env = build_env_with(&parent, OsStr::new("/bin"), &extra, false).unwrap();
     assert_eq!(
         env,
         env_of(&[
@@ -128,11 +128,49 @@ fn builder_extra_variables_override_parent_values() {
 #[test]
 fn builder_on_windows_drops_differently_cased_path() {
     let parent = env_of(&[("Path", r"C:\x"), ("SystemRoot", r"C:\Windows")]);
-    let env = build_env_with(&parent, OsStr::new(r"C:\y"), &[], true);
+    let env = build_env_with(&parent, OsStr::new(r"C:\y"), &[], true).unwrap();
     assert_eq!(
         env,
         env_of(&[("SystemRoot", r"C:\Windows"), ("PATH", r"C:\y")])
     );
+}
+
+#[test]
+fn builder_rejects_an_extra_variable_that_repeats_an_earlier_extra_one() {
+    let extra = env_of(&[
+        ("CLAUDE_CONFIG_DIR", "/profile/claude"),
+        ("CLAUDE_CONFIG_DIR", "/profile/tools/evil"),
+    ]);
+    let err = build_env_with(&[], OsStr::new("/bin"), &extra, false).unwrap_err();
+    assert_eq!(err.code, vision_core::ErrorCode::InvalidInput);
+}
+
+#[test]
+fn builder_on_windows_rejects_a_repeat_that_differs_only_in_case() {
+    let extra = env_of(&[("MY_HOME", "a"), ("my_home", "b")]);
+    assert!(build_env_with(&[], OsStr::new("/bin"), &extra, true).is_err());
+}
+
+#[test]
+fn desktop_session_variables_pass_so_a_terminal_can_open_the_browser() {
+    let passing: Vec<&str> = [
+        "DISPLAY",
+        "WAYLAND_DISPLAY",
+        "XDG_RUNTIME_DIR",
+        "DBUS_SESSION_BUS_ADDRESS",
+        "XAUTHORITY",
+    ]
+    .into_iter()
+    .filter(|n| is_allowed(n, false))
+    .collect();
+    assert_eq!(passing.len(), 5, "{passing:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn joined_path_drops_relative_and_empty_entries() {
+    let joined = vision_core::env::join_path(OsStr::new(".:bin::/usr/bin:relative/x"), &[]);
+    assert_eq!(joined, OsString::from("/usr/bin"));
 }
 
 #[test]
@@ -186,6 +224,81 @@ fn path_resolution_falls_back_to_the_process_path_when_the_shell_fails() {
     assert_eq!(
         std::env::split_paths(&path).next(),
         Some(std::path::PathBuf::from("/parent"))
+    );
+}
+
+#[cfg(unix)]
+const PROBE: &str = "printf '__VISION_PATH__%s__END__' \"$PATH\"";
+
+#[cfg(unix)]
+fn resolve_with_fake_shell(h: &Harness, name: &str, cfg: serde_json::Value) -> OsString {
+    let shell = h.install_fake(name, cfg);
+    let parent = vec![
+        (OsString::from("SHELL"), shell.into_os_string()),
+        (OsString::from("PATH"), OsString::from("/parent")),
+    ];
+    resolve_path(&vision_core::process::SystemCommandRunner, &parent)
+}
+
+#[cfg(unix)]
+fn first_dir(path: &OsString) -> Option<std::path::PathBuf> {
+    std::env::split_paths(path).next()
+}
+
+#[cfg(unix)]
+#[test]
+fn login_shell_path_survives_an_rc_file_that_starts_a_daemon() {
+    let h = Harness::new();
+    let path = resolve_with_fake_shell(
+        &h,
+        "fakeshell",
+        json!({"default": {"stdout": "__VISION_PATH__/from/shell__END__", "daemon_ms": 4000}}),
+    );
+    assert_eq!(first_dir(&path), Some("/from/shell".into()));
+}
+
+#[cfg(unix)]
+#[test]
+fn path_resolution_retries_as_a_login_shell_when_the_interactive_one_fails() {
+    let h = Harness::new();
+    let path = resolve_with_fake_shell(
+        &h,
+        "fakeshell",
+        json!({"responses": [
+            {"args": ["-ilc", PROBE], "stderr": "no job control", "exit": 1},
+            {"args": ["-lc", PROBE], "stdout": "__VISION_PATH__/from/login__END__"}
+        ], "default": {"exit": 1}}),
+    );
+    assert_eq!(first_dir(&path), Some("/from/login".into()));
+}
+
+#[cfg(unix)]
+#[test]
+fn path_resolution_retries_with_plain_c_when_login_shells_print_no_markers() {
+    let h = Harness::new();
+    let path = resolve_with_fake_shell(
+        &h,
+        "fakeshell",
+        json!({"responses": [
+            {"args": ["-c", PROBE], "stdout": "__VISION_PATH__/from/plain__END__"}
+        ], "default": {"stdout": "motd only"}}),
+    );
+    assert_eq!(first_dir(&path), Some("/from/plain".into()));
+}
+
+#[cfg(unix)]
+#[test]
+fn csh_is_asked_with_plain_c_only() {
+    let h = Harness::new();
+    let log = h.path("args.txt");
+    resolve_with_fake_shell(
+        &h,
+        "tcsh",
+        json!({"log_args": log, "default": {"stdout": "__VISION_PATH__/from/csh__END__"}}),
+    );
+    assert_eq!(
+        common::read(&log).lines().collect::<Vec<_>>(),
+        vec![serde_json::to_string(&["-c", PROBE]).unwrap()]
     );
 }
 

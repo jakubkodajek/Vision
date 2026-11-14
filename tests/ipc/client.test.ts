@@ -64,6 +64,10 @@ describe("ipc client", () => {
     );
   });
 
+  it("keeps the not_approved code of a declined confirmation", () => {
+    expect(toIpcError({ code: "not_approved", message: "Not approved" }).code).toBe("not_approved");
+  });
+
   it("maps a string rejection to internal", () => {
     expect(toIpcError("command mcp_foo not found")).toMatchObject({
       code: "internal",

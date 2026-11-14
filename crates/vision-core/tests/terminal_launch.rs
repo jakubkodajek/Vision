@@ -81,13 +81,47 @@ fn sign_in_script_is_user_only_executable() {
 }
 
 #[test]
-fn launch_scripts_are_removed_on_next_start() {
+fn launch_scripts_older_than_a_day_are_removed_on_next_start() {
+    let h = Harness::new();
+    h.install_fake("claude", json!({}));
+    let (core, _) = sign_in(&h, "claude");
+    drop(core);
+    let script = h.launches()[0].script.clone();
+    let two_days_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(48 * 3600);
+    std::fs::File::options()
+        .write(true)
+        .open(&script)
+        .unwrap()
+        .set_modified(two_days_ago)
+        .unwrap();
+    h.core();
+    assert!(!script.exists());
+}
+
+#[test]
+fn a_fresh_launch_script_survives_a_second_start() {
     let h = Harness::new();
     h.install_fake("claude", json!({}));
     let (core, _) = sign_in(&h, "claude");
     drop(core);
     h.core();
-    assert!(!h.launches()[0].script.exists());
+    assert!(h.launches()[0].script.exists());
+}
+
+#[test]
+fn startup_cleanup_leaves_other_tmp_files_alone() {
+    let h = Harness::new();
+    drop(h.core());
+    let other = h.data_root().join("tmp").join("other-instance.lock");
+    std::fs::write(&other, "x").unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&other)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(48 * 3600))
+        .unwrap();
+    h.core();
+    assert!(other.exists());
 }
 
 #[test]
@@ -244,4 +278,87 @@ fn rendered_script_passes_adversarial_argv_and_env_values_through_unchanged() {
     assert!(status.success());
     let logged: Vec<String> = serde_json::from_str(common::read(&dump).trim()).unwrap();
     assert_eq!(logged, args);
+}
+
+// ---- Windows console launch (SEC-5), pure and compiled on every OS ---------------------
+
+fn win_plan(script: &str) -> vision_core::ipc::IpcResult<vision_core::terminal::WindowsLaunch> {
+    vision_core::terminal::windows_terminal_command(
+        std::path::Path::new(r"C:\Windows"),
+        std::path::Path::new(script),
+    )
+}
+
+#[test]
+fn windows_launch_runs_cmd_with_d_and_k_instead_of_start() {
+    let plan = win_plan(r"C:\Users\Ada\AppData\Vision\tmp\launch_x.cmd").unwrap();
+    assert_eq!(plan.args, vec!["/d".to_owned(), "/k".to_owned()]);
+}
+
+#[test]
+fn windows_launch_uses_cmd_exe_from_the_system_root() {
+    let plan = win_plan(r"C:\v\launch_x.cmd").unwrap();
+    assert_eq!(
+        plan.program,
+        std::path::Path::new(r"C:\Windows")
+            .join("System32")
+            .join("cmd.exe")
+    );
+}
+
+#[test]
+fn windows_launch_wraps_the_script_path_in_two_pairs_of_quotes() {
+    let plan = win_plan(r"C:\Program Files\Vision\launch_x.cmd").unwrap();
+    assert_eq!(plan.raw_tail, r#"""C:\Program Files\Vision\launch_x.cmd"""#);
+}
+
+#[test]
+fn windows_launch_opens_a_new_console() {
+    let plan = win_plan(r"C:\v\launch_x.cmd").unwrap();
+    assert_eq!(
+        plan.creation_flags,
+        vision_core::terminal::CREATE_NEW_CONSOLE
+    );
+}
+
+#[test]
+fn windows_launch_rejects_an_ampersand_in_the_script_path() {
+    let e = win_plan(r"C:\Users\A&B\launch_x.cmd").unwrap_err();
+    assert_eq!(e.code, ErrorCode::TerminalUnavailable);
+}
+
+#[test]
+fn windows_launch_rejects_a_percent_sign_in_the_script_path() {
+    let e = win_plan(r"C:\Users\%USERNAME%\launch_x.cmd").unwrap_err();
+    assert_eq!(e.code, ErrorCode::TerminalUnavailable);
+}
+
+#[test]
+fn windows_launch_rejects_a_quote_in_the_script_path() {
+    let e = win_plan("C:\\Users\\a\"b\\launch_x.cmd").unwrap_err();
+    assert_eq!(e.code, ErrorCode::TerminalUnavailable);
+}
+
+#[test]
+fn windows_launch_rejects_a_caret_in_the_script_path() {
+    let e = win_plan(r"C:\Users\a^b\launch_x.cmd").unwrap_err();
+    assert_eq!(e.code, ErrorCode::TerminalUnavailable);
+}
+
+#[test]
+fn windows_launch_rejects_an_exclamation_mark_in_the_script_path() {
+    let e = win_plan(r"C:\Users\a!b\launch_x.cmd").unwrap_err();
+    assert_eq!(e.code, ErrorCode::TerminalUnavailable);
+}
+
+#[test]
+fn windows_launch_rejects_a_pipe_in_the_script_path() {
+    let e = win_plan(r"C:\Users\a|b\launch_x.cmd").unwrap_err();
+    assert_eq!(e.code, ErrorCode::TerminalUnavailable);
+}
+
+#[test]
+fn windows_launch_rejects_angle_brackets_in_the_script_path() {
+    let e = win_plan(r"C:\Users\a<b>\launch_x.cmd").unwrap_err();
+    assert_eq!(e.code, ErrorCode::TerminalUnavailable);
 }
