@@ -24,6 +24,7 @@ instead of claiming success.
 | End-to-end / UI tests | `make e2e` |
 | Everything CI runs | `make check` |
 | Run the app locally | `make dev` |
+| Build installers for this OS | `make build` |
 
 ## Repository layout
 
