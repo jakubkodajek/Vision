@@ -338,6 +338,7 @@ describe("sync to Claude Code", () => {
       synced: ["filesystem"],
       removed: ["old"],
       failed: [{ name: "broken", message: "Bad" }],
+      skipped: [],
     };
     await openMcp(fake);
     fireEvent.click(screen.getByRole("button", { name: "Sync to Claude Code" }));

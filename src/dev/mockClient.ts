@@ -33,6 +33,7 @@ function spec(partial: Partial<ToolSpecView> & Pick<ToolSpecView, "id" | "name" 
     status_parser: "exit_code",
     isolation: "unverified",
     builtin: true,
+    invalid: null,
     ...partial,
   };
 }
@@ -561,6 +562,7 @@ export function createDevMockClient(): VisionClient {
           synced: d.servers.filter((s) => s.enabled).map((s) => s.name),
           removed: d.servers.filter((s) => !s.enabled).map((s) => s.name),
           failed: [],
+          skipped: [],
         };
       }, 1200),
     mcpAuthorize: () => wait(() => null, 300),

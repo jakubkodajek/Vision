@@ -41,6 +41,7 @@ export function toolSpec(id: string, name: string, extra: Partial<ToolSpecView> 
     status_parser: "exit_code",
     isolation: "verified",
     builtin: true,
+    invalid: null,
     ...extra,
   };
 }
@@ -95,7 +96,7 @@ export class FakeClient implements VisionClient {
   /** Status results returned by successive `toolCheck` calls, per `profile/tool`. */
   checkQueue = new Map<string, ToolStatus[]>();
   servers = new Map<string, McpServerView[]>();
-  syncReport: SyncReport = { synced: [], removed: [], failed: [] };
+  syncReport: SyncReport = { synced: [], removed: [], failed: [], skipped: [] };
   /** Result of the next `mcpTest`, per server id. */
   testResults = new Map<string, McpServerView["health"]>();
   readonly log: { command: Command; args: unknown }[] = [];
