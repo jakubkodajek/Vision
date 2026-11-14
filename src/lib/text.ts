@@ -21,3 +21,11 @@ export function splitFences(text: string): TextSegment[] {
     .map((s) => (s.kind === "text" ? { ...s, text: s.text.replace(/^\n+|\n+$/g, "") } : s))
     .filter((s) => s.kind === "code" || s.text.length > 0);
 }
+
+/** Splits text entered one item per line into trimmed, non-empty items. */
+export function linesToList(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}

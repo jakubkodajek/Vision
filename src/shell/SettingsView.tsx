@@ -10,13 +10,15 @@ const THEMES: { id: ThemePreference; label: string; icon: ReactNode }[] = [
 ];
 
 export interface SettingsViewProps {
+  /** Sections shown before Appearance, e.g. profile management. */
+  top?: ReactNode;
   theme: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
   coreVersion: string | null;
 }
 
-/** App settings. Only appearance exists for now; profiles and tools follow in M1. */
-export function SettingsView({ theme, onThemeChange, coreVersion }: SettingsViewProps) {
+/** App settings: optional sections from the app (profiles), appearance and about. */
+export function SettingsView({ top, theme, onThemeChange, coreVersion }: SettingsViewProps) {
   return (
     <div className="section-view">
       <header className="view-header">
@@ -25,6 +27,7 @@ export function SettingsView({ theme, onThemeChange, coreVersion }: SettingsView
         </div>
       </header>
       <div className="settings-body">
+        {top}
         <section className="settings-group" aria-labelledby="settings-appearance">
           <h3 id="settings-appearance" className="section-heading">
             Appearance

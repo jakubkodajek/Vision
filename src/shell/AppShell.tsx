@@ -9,10 +9,12 @@ import {
   Moon,
   PanelLeft,
   PanelRight,
+  Plug,
   Plus,
   Settings,
   Sun,
   UserRound,
+  Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { CommandPalette } from "../components/CommandPalette";
@@ -20,7 +22,7 @@ import type { ComposerSubmission, PickerOption } from "../components/Composer";
 import { Panel } from "../components/Panel";
 import { EmptyState } from "../components/primitives";
 import { Sidebar } from "../components/Sidebar";
-import { DEMO_AGENTS, DEMO_MODELS, DEMO_PROFILES } from "../demo/workspace";
+import { DEMO_AGENTS, DEMO_MODELS } from "../demo/workspace";
 import type { Command } from "../lib/commands";
 import { hasModifier, shortcutLabel } from "../lib/platform";
 import { isBoolean, isFiniteNumber, readPreference, writePreference } from "../lib/storage";
@@ -48,9 +50,30 @@ import {
 } from "./state";
 
 export interface AppShellProps {
-  /** Loads a profile's workspace; injected so tests and the future core can replace the demo. */
-  loadWorkspace: (profileId: string) => Promise<Workspace>;
-  profiles?: readonly Profile[];
+  /**
+   * Loads a profile's preview projects and runs. Omitted in the shipped app until runs exist
+   * (F-020): the project tree, recent runs and New task are then hidden.
+   */
+  loadWorkspace?: (profileId: string) => Promise<Workspace>;
+  profiles: readonly Profile[];
+  /** Controlled active profile; with it, switching only calls `onSwitchProfile`. */
+  activeProfileId?: string;
+  onSwitchProfile?: (profileId: string) => void;
+  /** Enables "New profile…" in the profile menu and the palette. */
+  onNewProfile?: () => void;
+  /** Enables "Manage profiles" in the profile menu. */
+  onManageProfiles?: () => void;
+  /** Controlled section; navigation then also calls `onNavigate`. */
+  section?: Section;
+  onNavigate?: (section: Section) => void;
+  /** Main content for a section; `undefined` falls back to the built-in view. */
+  renderSection?: (section: Section) => ReactNode;
+  /** Content shown first in Settings, e.g. profile management. */
+  settingsTop?: ReactNode;
+  /** Commands added to the palette. */
+  extraCommands?: readonly Command[];
+  /** Message shown above the main content, e.g. a failed profile switch. */
+  banner?: ReactNode;
   coreVersion: string | null;
   /** Footer content, e.g. the core connection status. */
   footer?: ReactNode;
@@ -71,6 +94,8 @@ const PREVIEW_REPLY =
 
 const NAV_ICONS: Record<Section, ReactNode> = {
   home: <House width={16} height={16} />,
+  tools: <Wrench width={16} height={16} />,
+  mcp: <Plug width={16} height={16} />,
   projects: <FolderGit2 width={16} height={16} />,
   agents: <Bot width={16} height={16} />,
   tasks: <ListChecks width={16} height={16} />,
@@ -80,6 +105,8 @@ const NAV_ICONS: Record<Section, ReactNode> = {
 
 const SECTION_LABEL: Record<Section, string> = {
   home: "Home",
+  tools: "Tools",
+  mcp: "MCP servers",
   projects: "Projects",
   agents: "Agents",
   tasks: "Tasks",
@@ -87,9 +114,12 @@ const SECTION_LABEL: Record<Section, string> = {
   settings: "Settings",
 };
 
-function initialState(profiles: readonly Profile[]): ShellState {
+function initialState({
+  profiles,
+  activeProfileId,
+}: Pick<AppShellProps, "profiles" | "activeProfileId">): ShellState {
   return {
-    profileId: profiles[0]?.id ?? "",
+    profileId: activeProfileId ?? profiles[0]?.id ?? "",
     workspaces: {},
     section: "home",
     activeRunId: null,
@@ -128,18 +158,51 @@ function timeNow(): string {
 /** The Vision window: sidebar, main column, side panel and command palette. */
 export function AppShell({
   loadWorkspace,
-  profiles = DEMO_PROFILES,
+  profiles,
+  activeProfileId,
+  onSwitchProfile,
+  onNewProfile,
+  onManageProfiles,
+  section: controlledSection,
+  onNavigate,
+  renderSection,
+  settingsTop,
+  extraCommands,
+  banner,
   coreVersion,
   footer,
   streamDelayMs = 28,
   decisionDelayMs = 500,
 }: AppShellProps) {
-  const [state, dispatch] = useReducer(shellReducer, profiles, initialState);
+  const [state, dispatch] = useReducer(shellReducer, { profiles, activeProfileId }, initialState);
+  const section = controlledSection ?? state.section;
+  const runsEnabled = loadWorkspace !== undefined;
   const shellRef = useRef<HTMLDivElement>(null);
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const mounted = useRef(true);
 
   const profile = profiles.find((p) => p.id === state.profileId) ?? profiles[0];
+  // A controlled profile id is mirrored into the reducer so runs stay per profile.
+  useEffect(() => {
+    if (activeProfileId !== undefined) dispatch({ type: "profile/switch", profileId: activeProfileId });
+  }, [activeProfileId]);
+
+  const switchProfile = useCallback(
+    (profileId: string) => {
+      if (onSwitchProfile) onSwitchProfile(profileId);
+      else dispatch({ type: "profile/switch", profileId });
+    },
+    [onSwitchProfile],
+  );
+
+  const navigate = useCallback(
+    (next: Section) => {
+      dispatch({ type: "navigate", section: next });
+      onNavigate?.(next);
+    },
+    [onNavigate],
+  );
+
   const storedWorkspace = state.workspaces[state.profileId];
   const workspace = useMemo<LoadState<Workspace>>(
     () => storedWorkspace ?? { kind: "loading" },
@@ -172,6 +235,7 @@ export function AppShell({
   const [deciding, setDeciding] = useState<ReadonlySet<string>>(new Set());
   const load = useCallback(
     (profileId: string) => {
+      if (!loadWorkspace) return;
       // StrictMode runs mount effects twice; never start a second load for the same profile.
       if (inFlight.current.has(profileId)) return;
       inFlight.current.add(profileId);
@@ -197,8 +261,8 @@ export function AppShell({
 
   const currentWorkspaceKind = state.workspaces[state.profileId]?.kind;
   useEffect(() => {
-    if (currentWorkspaceKind === undefined && state.profileId) load(state.profileId);
-  }, [currentWorkspaceKind, state.profileId, load]);
+    if (runsEnabled && currentWorkspaceKind === undefined && state.profileId) load(state.profileId);
+  }, [runsEnabled, currentWorkspaceKind, state.profileId, load]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -377,8 +441,9 @@ export function AppShell({
   }, []);
 
   const commands = useMemo<Command[]>(() => {
-    const list: Command[] = [
-      {
+    const list: Command[] = [];
+    if (runsEnabled) {
+      list.push({
         id: "new-task",
         label: "New task",
         group: "Actions",
@@ -387,7 +452,9 @@ export function AppShell({
         run: () => {
           dispatch({ type: "composer/focus" });
         },
-      },
+      });
+    }
+    list.push(
       {
         id: "toggle-sidebar",
         label: state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar",
@@ -421,15 +488,25 @@ export function AppShell({
           dispatch({ type: "profile/menu", open: true });
         },
       },
-    ];
-    for (const section of Object.keys(SECTION_LABEL) as Section[]) {
+    );
+    if (onNewProfile) {
       list.push({
-        id: `go-${section}`,
-        label: `Go to ${SECTION_LABEL[section]}`,
+        id: "new-profile",
+        label: "New profile…",
+        group: "Actions",
+        icon: <Plus width={16} height={16} />,
+        keywords: "create add account",
+        run: onNewProfile,
+      });
+    }
+    for (const target of Object.keys(SECTION_LABEL) as Section[]) {
+      list.push({
+        id: `go-${target}`,
+        label: `Go to ${SECTION_LABEL[target]}`,
         group: "Navigation",
-        icon: NAV_ICONS[section],
+        icon: NAV_ICONS[target],
         run: () => {
-          dispatch({ type: "navigate", section });
+          navigate(target);
         },
       });
     }
@@ -442,7 +519,7 @@ export function AppShell({
         keywords: p.account,
         disabled: p.id === state.profileId,
         run: () => {
-          dispatch({ type: "profile/switch", profileId: p.id });
+          switchProfile(p.id);
         },
       });
     }
@@ -476,8 +553,22 @@ export function AppShell({
         },
       });
     }
+    if (extraCommands) list.push(...extraCommands);
     return list;
-  }, [activeRun, profiles, runs, state.panelOpen, state.profileId, state.sidebarCollapsed, state.theme]);
+  }, [
+    activeRun,
+    extraCommands,
+    navigate,
+    onNewProfile,
+    profiles,
+    runs,
+    runsEnabled,
+    state.panelOpen,
+    state.profileId,
+    state.sidebarCollapsed,
+    state.theme,
+    switchProfile,
+  ]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -494,7 +585,7 @@ export function AppShell({
       } else if (key === "j" && activeRun) {
         event.preventDefault();
         dispatch({ type: "panel/set", open: !state.panelOpen });
-      } else if (key === "n") {
+      } else if (key === "n" && runsEnabled) {
         event.preventDefault();
         dispatch({ type: "palette/set", open: false });
         dispatch({ type: "composer/focus" });
@@ -504,7 +595,7 @@ export function AppShell({
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [activeRun, state.paletteOpen, state.panelOpen]);
+  }, [activeRun, runsEnabled, state.paletteOpen, state.panelOpen]);
 
   if (!profile) {
     return (
@@ -524,8 +615,11 @@ export function AppShell({
     { id: "artifacts", label: "Artifacts" },
   ];
 
+  const custom = activeRun ? undefined : renderSection?.(section);
   let main: ReactNode;
-  if (activeRun) {
+  if (custom !== undefined) {
+    main = custom;
+  } else if (activeRun) {
     main = (
       <RunView
         run={activeRun}
@@ -546,7 +640,7 @@ export function AppShell({
         models={MODELS}
       />
     );
-  } else if (state.section === "home") {
+  } else if (section === "home" && runsEnabled) {
     main = (
       <HomeView
         profile={profile}
@@ -563,9 +657,10 @@ export function AppShell({
         focusKey={state.composerFocusKey}
       />
     );
-  } else if (state.section === "settings") {
+  } else if (section === "settings") {
     main = (
       <SettingsView
+        top={settingsTop}
         theme={state.theme}
         onThemeChange={(theme) => {
           dispatch({ type: "theme/set", theme });
@@ -573,8 +668,19 @@ export function AppShell({
         coreVersion={coreVersion}
       />
     );
+  } else if (section === "home" || section === "tools" || section === "mcp") {
+    main = (
+      <div className="section-view">
+        <div className="section-body">
+          <EmptyState
+            title={`${SECTION_LABEL[section]} needs the Vision core`}
+            description="This section shows data from the Vision core, which is not connected here."
+          />
+        </div>
+      </div>
+    );
   } else {
-    main = <SectionView section={state.section} />;
+    main = <SectionView section={section} />;
   }
 
   return (
@@ -592,23 +698,25 @@ export function AppShell({
         }}
         profiles={profiles}
         activeProfileId={state.profileId}
-        onSwitchProfile={(profileId) => {
-          dispatch({ type: "profile/switch", profileId });
-        }}
+        onSwitchProfile={switchProfile}
+        onNewProfile={onNewProfile}
+        onManageProfiles={onManageProfiles}
         profileMenuOpen={state.profileMenuOpen}
         onProfileMenuOpenChange={(open) => {
           dispatch({ type: "profile/menu", open });
         }}
-        section={state.section}
+        section={section}
         activeRunId={state.activeRunId}
-        onNavigate={(section) => {
-          dispatch({ type: "navigate", section });
-        }}
-        onNewTask={() => {
-          dispatch({ type: "composer/focus" });
-        }}
+        onNavigate={navigate}
+        onNewTask={
+          runsEnabled
+            ? () => {
+                dispatch({ type: "composer/focus" });
+              }
+            : undefined
+        }
         onOpenPalette={openPalette}
-        workspace={workspace}
+        workspace={runsEnabled ? workspace : null}
         onRetryWorkspace={() => {
           load(state.profileId);
         }}
@@ -622,6 +730,7 @@ export function AppShell({
         footer={footer}
       />
       <main className="main" aria-label="Main content">
+        {banner}
         {main}
       </main>
       {showPanel && (
