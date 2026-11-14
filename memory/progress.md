@@ -70,3 +70,8 @@ Template:
 - Tests: new `tests/approvals.rs`, `tests/config_vars.rs`, `tests/process_runner.rs`; regression tests appended to the existing suites; repro behaviours ported into the Rust fake (no Python).
 - Not verified live: Windows terminal launch (new console with inherited handles), the dialog's default button (the plugin does not expose it), macOS and Windows test runs (CI step added).
 - Next: UI agent shows `not_approved`, `SyncReport.skipped` and `ToolSpecView.invalid`.
+
+## 2026-11-14 - real-app UI review fixes
+- Done: core A1-A7 (IpcError field/entry_key, ToolSpecView.approved, McpServerView synced/has_secrets, `mcp_set_enabled`, `app_open_releases_page`, more config vars, health kept on unchanged destination), UI CR-1..CR-16 and UX-1..UX-38 (approval-aware checks, per-key sequence guards, accessible dialog stack, field-level errors, live region per scope, 3:1 control borders and focus ring, copy).
+- Evidence: vitest and Rust suites in `make check` (`.work/real-app/check-uifix.log`); axe with color-contrast 0 violations in 12 states x light/dark x 1280x820/880x560; focus/live-region script 23 PASS (`.work/real-app/uxfix/`); screenshots retaken in `docs/screenshots/real-app/`.
+- Partial/deferred: UX-11 (values wrap, no Copy button); NewProfileDialog has no unsaved-changes prompt; stored-secret screenshot shows the secret row below the fold.
