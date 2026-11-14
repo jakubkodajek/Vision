@@ -199,9 +199,17 @@ function SidebarContent({
   return (
     <>
       <section className="sidebar-section" aria-labelledby="sidebar-projects-heading">
-        <h2 id="sidebar-projects-heading" className="sidebar-heading">
-          Projects
-        </h2>
+        <div className="sidebar-heading-row">
+          <h2 id="sidebar-projects-heading" className="sidebar-heading">
+            Projects
+          </h2>
+          <span
+            className="preview-badge is-small"
+            title="Projects and runs are sample data until storage lands"
+          >
+            Preview data
+          </span>
+        </div>
         {projects.length === 0 ? (
           <EmptyState compact title="No projects yet" description="Add a repository to start a task." />
         ) : (

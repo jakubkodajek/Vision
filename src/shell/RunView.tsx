@@ -72,7 +72,7 @@ export function RunView({
             </span>
             <span className="run-meta-item run-branch">
               <GitBranch width={13} height={13} aria-hidden="true" />
-              {run.branch}
+              <span className="run-branch-name">{run.branch}</span>
             </span>
           </div>
         </div>

@@ -72,7 +72,7 @@ export function ProfileSwitcher({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        aria-label={`Profile: ${active.name}. Switch profile`}
+        aria-label={collapsed ? `${active.name} profile, switch profile` : undefined}
         title={collapsed ? `Profile: ${active.name}` : undefined}
         onClick={() => {
           setInitialFocus("current");
@@ -87,6 +87,7 @@ export function ProfileSwitcher({
               <span className="profile-name">{active.name}</span>
               <span className="profile-account">{active.account}</span>
             </span>
+            <span className="visually-hidden">Switch profile</span>
             <ChevronsUpDown className="profile-chevron" width={14} height={14} aria-hidden="true" />
           </>
         )}

@@ -490,8 +490,14 @@
   outline: none;
 }
 
-.tree-item:focus-visible > .tree-row {
+.tree-item:focus-visible {
   box-shadow: inset 0 0 0 var(--focus-ring-width) var(--accent);
+}
+
+.tree-empty-hint {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
 }
 
 .tree-row {

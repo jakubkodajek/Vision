@@ -165,6 +165,19 @@
   letter-spacing: 0.02em;
 }
 
+.sidebar-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-right: var(--space-2);
+}
+
+.preview-badge.is-small {
+  padding: 0 6px;
+  font-size: 11px;
+}
+
 .sidebar-skeletons {
   display: flex;
   flex-direction: column;
@@ -311,10 +324,15 @@
   white-space: nowrap;
 }
 
-.run-branch {
+.run-branch-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-branch {
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   gap: 4px;

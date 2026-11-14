@@ -34,6 +34,7 @@ async function openUiShellRun() {
 
 describe("AppShell", () => {
   beforeEach(() => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
     window.localStorage.clear();
     delete document.documentElement.dataset.theme;
   });
@@ -112,7 +113,7 @@ describe("AppShell", () => {
   it("applies the panel width as a CSS variable, not an inline style attribute in markup", async () => {
     renderShell();
     await openUiShellRun();
-    fireEvent.keyDown(screen.getByRole("separator"), { key: "Home" });
+    fireEvent.keyDown(screen.getByRole("separator"), { key: "End" });
     expect(shell().style.getPropertyValue("--panel-width")).toBe("760px");
   });
 
@@ -239,5 +240,14 @@ describe("AppShell", () => {
     fireEvent.keyDown(window, { key: "n", ctrlKey: true });
     expect(screen.getByRole("textbox", { name: "Task description" })).toHaveValue("Half-written idea");
     expect(screen.getByRole("textbox", { name: "Task description" })).toHaveFocus();
+  });
+
+  it("keeps the side panel closed by default in a narrow window", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1000 });
+    renderShell();
+    await openUiShellRun();
+    expect(screen.queryByRole("complementary", { name: "Run details" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show side panel" }));
+    expect(screen.getByRole("complementary", { name: "Run details" })).toBeInTheDocument();
   });
 });

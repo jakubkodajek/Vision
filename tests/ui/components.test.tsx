@@ -234,9 +234,20 @@ describe("Tree", () => {
     expect(screen.getByRole("treeitem", { name: /dotfiles/ })).toHaveFocus();
   });
 
-  it("shows an empty group for a branch without children", () => {
+  it("marks a folder without children as empty and not expandable", () => {
     render(<Tree label="Projects" nodes={nodes} expanded={new Set(["q"])} selectedId={null} onToggle={vi.fn()} onSelect={vi.fn()} />);
-    expect(screen.getByText("No tasks yet")).toBeInTheDocument();
+    const item = screen.getByRole("treeitem", { name: /dotfiles/ });
+    expect(item).toHaveTextContent("empty");
+    expect(item).not.toHaveAttribute("aria-expanded");
+  });
+
+  it("gives every item an accessible name equal to its visible text, with level and position", () => {
+    render(<Tree label="Projects" nodes={nodes} expanded={new Set(["p"])} selectedId={null} onToggle={vi.fn()} onSelect={vi.fn()} />);
+    const parent = screen.getByRole("treeitem", { name: "vision" });
+    expect(parent).toHaveAttribute("aria-level", "1");
+    expect(parent).toHaveAttribute("aria-posinset", "1");
+    expect(parent).toHaveAttribute("aria-setsize", "2");
+    expect(screen.getByRole("treeitem", { name: "Task one" })).toHaveAttribute("aria-level", "2");
   });
 });
 
@@ -272,9 +283,9 @@ describe("Panel", () => {
     fireEvent.keyDown(separator, { key: "ArrowRight" });
     expect(onResize).toHaveBeenLastCalledWith(424);
     fireEvent.keyDown(separator, { key: "Home" });
-    expect(onResize).toHaveBeenLastCalledWith(760);
-    fireEvent.keyDown(separator, { key: "End" });
     expect(onResize).toHaveBeenLastCalledWith(320);
+    fireEvent.keyDown(separator, { key: "End" });
+    expect(onResize).toHaveBeenLastCalledWith(760);
   });
 
   it("closes and switches tabs with arrow keys", () => {

@@ -94,7 +94,8 @@ function initialState(profiles: readonly Profile[]): ShellState {
     section: "home",
     activeRunId: null,
     sidebarCollapsed: readPreference("sidebarCollapsed", false, isBoolean),
-    panelOpen: readPreference("panelOpen", true, isBoolean),
+    // Open by default only where it fits beside the conversation (it floats below 1100 px).
+    panelOpen: readPreference("panelOpen", window.innerWidth >= 1200, isBoolean),
     panelWidth: Math.min(
       PANEL_MAX_WIDTH,
       Math.max(PANEL_MIN_WIDTH, readPreference("panelWidth", PANEL_DEFAULT_WIDTH, isFiniteNumber)),

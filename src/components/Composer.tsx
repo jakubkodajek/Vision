@@ -227,10 +227,18 @@ export function Composer({
           </IconButton>
         </div>
       </div>
-      {disabled && disabledReason && (
+      {disabled && disabledReason ? (
         <p id={hintId} className="composer-hint">
           {disabledReason}
         </p>
+      ) : (
+        // Reserve the hint row under a docked composer so it does not jump when the hint goes.
+        variant === "docked" &&
+        !error && (
+          <p className="composer-hint" aria-hidden="true">
+            {"\u00a0"}
+          </p>
+        )
       )}
       {error && (
         <p id={`${hintId}-error`} className="composer-error" role="alert">

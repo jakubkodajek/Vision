@@ -34,7 +34,8 @@ function clamp(value: number, min: number, max: number): number {
  * Right-hand side panel with tabs, a close button and a resize handle on its
  * left edge. The handle is a focusable separator (WAI-ARIA window splitter
  * pattern, https://www.w3.org/WAI/ARIA/apg/patterns/windowsplitter/):
- * Left/Right resize by 16 px, Home/End jump to the limits.
+ * Left grows and Right shrinks by 16 px; Home and End jump to the minimum and maximum
+ * width, matching aria-valuemin and aria-valuemax.
  */
 export function Panel({
   title,
@@ -77,8 +78,8 @@ export function Panel({
     let next: number | null = null;
     if (event.key === "ArrowLeft") next = width + KEY_STEP_PX;
     else if (event.key === "ArrowRight") next = width - KEY_STEP_PX;
-    else if (event.key === "Home") next = maxWidth;
-    else if (event.key === "End") next = minWidth;
+    else if (event.key === "Home") next = minWidth;
+    else if (event.key === "End") next = maxWidth;
     if (next !== null) {
       event.preventDefault();
       onResize(clamp(next, minWidth, maxWidth));
@@ -100,7 +101,16 @@ export function Panel({
   };
 
   return (
-    <aside className="panel" aria-label={title}>
+    <aside
+      className="panel"
+      aria-label={title}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !event.defaultPrevented) {
+          event.preventDefault();
+          onClose();
+        }
+      }}
+    >
       <div
         className="panel-resizer"
         role="separator"
