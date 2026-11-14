@@ -1,7 +1,9 @@
 /**
  * In-memory implementation of the IPC client for UI tests: records every call, can fail the
  * next call of a command, and can hold calls until the test releases them (to control the
- * order in which responses arrive).
+ * order in which responses arrive). With {@link FakeClient.computeAtCall} a held call's
+ * answer is computed when it is made (like the core reading its data at the start of a slow
+ * operation) and only delivered on release, so races are modelled faithfully.
  */
 import type { VisionClient } from "../../src/data/client";
 import type {
@@ -42,6 +44,7 @@ export function toolSpec(id: string, name: string, extra: Partial<ToolSpecView> 
     isolation: "verified",
     builtin: true,
     invalid: null,
+    approved: true,
     ...extra,
   };
 }
@@ -82,6 +85,8 @@ export function server(id: string, name: string, extra: Partial<McpServerView> =
       server_version: null,
       checked_at: null,
     },
+    synced: false,
+    has_secrets: false,
     ...extra,
   };
 }
@@ -102,6 +107,7 @@ export class FakeClient implements VisionClient {
   readonly log: { command: Command; args: unknown }[] = [];
   private failures = new Map<Command, { error: VisionIpcError; always: boolean }>();
   private held = new Set<Command>();
+  private atCall = new Set<Command>();
   private pending = new Map<Command, Held[]>();
   private counter = 0;
 
@@ -114,6 +120,15 @@ export class FakeClient implements VisionClient {
   /** Holds every later call of `command` until {@link release}. */
   hold(command: Command): this {
     this.held.add(command);
+    return this;
+  }
+
+  /**
+   * Computes the answer of every later call of `command` when it is made, not when a held
+   * call is released.
+   */
+  computeAtCall(command: Command): this {
+    this.atCall.add(command);
     return this;
   }
 
@@ -145,18 +160,25 @@ export class FakeClient implements VisionClient {
   private answer<T>(command: Command, args: unknown, compute: () => T): Promise<T> {
     this.log.push({ command, args });
     return new Promise<T>((resolve, reject) => {
-      const run = () => {
+      const outcome = (): { ok: true; value: T } | { ok: false; error: Error } => {
         const failure = this.failures.get(command);
         if (failure) {
           if (!failure.always) this.failures.delete(command);
-          reject(failure.error);
-          return;
+          return { ok: false, error: failure.error };
         }
         try {
-          resolve(compute());
+          return { ok: true, value: compute() };
         } catch (e) {
-          reject(e instanceof Error ? e : new Error(String(e)));
+          return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
         }
+      };
+      const settle = (o: ReturnType<typeof outcome>) => {
+        if (o.ok) resolve(o.value);
+        else reject(o.error);
+      };
+      const early = this.atCall.has(command) ? outcome() : null;
+      const run = () => {
+        settle(early ?? outcome());
       };
       if (this.held.has(command)) {
         const list = this.pending.get(command) ?? [];
@@ -174,7 +196,12 @@ export class FakeClient implements VisionClient {
     return list;
   }
 
-  appInfo = () => this.answer("appInfo", undefined, () => ({ name: "Vision", version: "0.1.0" }));
+  /** What the next `appInfo` answers (to test payload validation). */
+  appInfoValue: unknown = { name: "Vision", version: "0.1.0" };
+
+  appInfo = () => this.answer("appInfo", undefined, () => this.appInfoValue as { name: string; version: string });
+
+  appOpenReleasesPage = () => this.answer("appOpenReleasesPage", undefined, () => null);
 
   bootstrap = () =>
     this.answer("bootstrap", undefined, () => ({
@@ -246,6 +273,10 @@ export class FakeClient implements VisionClient {
   customToolSave: VisionClient["customToolSave"] = (args) =>
     this.answer("customToolSave", args, () => {
       const t = args.tool;
+      const exists = [...this.tools.values()].some((list) => list.some((v) => v.spec.id === t.id));
+      if (exists && !args.replace)
+        throw new VisionIpcError("conflict", "A custom tool with this id already exists", "id");
+      if (!exists && args.replace) throw new VisionIpcError("not_found", "This custom tool no longer exists");
       const spec = toolSpec(t.id, t.name, {
         binary: t.binary,
         builtin: false,
@@ -255,8 +286,15 @@ export class FakeClient implements VisionClient {
         logout: t.logout ?? null,
         status: t.status ?? null,
         description: t.description ?? "",
+        config_env: [{ var: t.config_var, kind: t.config_kind, rel: t.config_kind === "file" ? "config" : "" }],
+        approved: false,
       });
-      for (const list of this.tools.values()) list.push(toolView(spec, null));
+      for (const [id, list] of this.tools) {
+        this.tools.set(
+          id,
+          exists ? list.map((v) => (v.spec.id === t.id ? toolView(spec, null) : v)) : [...list, toolView(spec, null)],
+        );
+      }
       return spec;
     });
 
@@ -296,12 +334,24 @@ export class FakeClient implements VisionClient {
             : { kind: "http", url: input.transport.url, headers: input.transport.headers.map(entryView) },
         tool_ids: input.tool_ids,
         enabled: input.enabled,
+        synced: old?.synced ?? false,
+        has_secrets: (input.transport.kind === "stdio" ? input.transport.env : input.transport.headers).some(
+          (e) => e.value.kind === "secret",
+        ),
       });
       this.servers.set(
         args.profile_id,
         old ? list.map((s) => (s.id === old.id ? view : s)) : [...list, view],
       );
       return structuredClone(view);
+    });
+
+  mcpSetEnabled: VisionClient["mcpSetEnabled"] = (args) =>
+    this.answer("mcpSetEnabled", args, () => {
+      const s = (this.servers.get(args.profile_id) ?? []).find((x) => x.id === args.server_id);
+      if (!s) throw new VisionIpcError("not_found", "MCP server not found");
+      s.enabled = args.enabled;
+      return structuredClone(s);
     });
 
   mcpDelete: VisionClient["mcpDelete"] = (args) =>
@@ -357,6 +407,7 @@ export function standardFake(): FakeClient {
           { key: "API_TOKEN", value: { kind: "secret", has_value: true } },
         ],
       },
+      has_secrets: true,
       health: {
         status: "ok",
         message: null,

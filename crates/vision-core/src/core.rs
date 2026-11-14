@@ -25,10 +25,10 @@ use crate::gate::{Entered, Gates};
 use crate::ids;
 use crate::ipc::{
     AppInfo, Bootstrap, CustomToolInput, CustomToolSaveArgs, ErrorCode, IpcError, IpcResult,
-    KeyValueInput, McpHealth, McpSaveArgs, McpServerArgs, McpServerView, McpTransportInput,
-    McpTransportView, Platform, Profile, ProfileCreateArgs, ProfileDeleteArgs, ProfileScopeArgs,
-    ProfileSetActiveArgs, ProfileUpdateArgs, SyncFailure, SyncReport, SyncSkip, ToolArgs,
-    ToolIdArgs, ToolSpecView, ToolStatus, ToolView, ValueInput,
+    KeyValueInput, McpHealth, McpSaveArgs, McpServerArgs, McpServerView, McpSetEnabledArgs,
+    McpTransportInput, McpTransportView, Platform, Profile, ProfileCreateArgs, ProfileDeleteArgs,
+    ProfileScopeArgs, ProfileSetActiveArgs, ProfileUpdateArgs, SyncFailure, SyncReport, SyncSkip,
+    ToolArgs, ToolIdArgs, ToolSpecView, ToolStatus, ToolView, ValueInput,
 };
 use crate::mcp::{
     self, EntryKind, McpProbe, ProbeTarget, ResolvedServer, ResolvedTransport, SpecMcpProbe,
@@ -184,7 +184,7 @@ impl StoredServer {
         )
     }
 
-    fn view(&self) -> McpServerView {
+    fn view(&self, managed: &BTreeSet<String>) -> McpServerView {
         let entries = self.entries.iter().map(StoredEntry::view).collect();
         McpServerView {
             id: self.id.clone(),
@@ -204,7 +204,19 @@ impl StoredServer {
             tool_ids: self.tool_ids.clone(),
             enabled: self.enabled,
             health: self.health.clone(),
+            synced: managed.contains(&self.name),
+            has_secrets: self.has_secrets(),
         }
+    }
+
+    /// Whether `other` runs exactly the same thing (what a health check depends on).
+    fn same_executable(&self, other: &Self) -> bool {
+        self.transport == other.transport
+            && self.command == other.command
+            && self.args == other.args
+            && self.url == other.url
+            && self.entries == other.entries
+            && self.tool_ids == other.tool_ids
     }
 }
 
@@ -235,6 +247,23 @@ fn row_to_server(r: &rusqlite::Row<'_>) -> rusqlite::Result<StoredServer> {
         created_at: r.get(10)?,
         revision: r.get(11)?,
     })
+}
+
+/// Attributes a `conflict` (duplicate profile name) to the `name` field.
+fn name_conflict(e: IpcError) -> IpcError {
+    if e.code == ErrorCode::Conflict {
+        e.with_field("name")
+    } else {
+        e
+    }
+}
+
+/// Names Vision manages in the profile's Claude Code user scope.
+fn managed_names(db: &Db) -> IpcResult<BTreeSet<String>> {
+    let conn = db.lock()?;
+    let mut st = conn.prepare("SELECT name FROM mcp_managed ORDER BY name")?;
+    let rows = st.query_map([], |r| r.get::<_, String>(0))?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 fn lossy(p: &Path) -> String {
@@ -797,16 +826,17 @@ impl Core {
     /// # Errors
     /// `invalid_input` for a bad name, `conflict` for a duplicate.
     pub fn profile_create(&self, args: ProfileCreateArgs) -> IpcResult<Profile> {
-        let name = profiles::normalize_name(&args.name)?;
+        let name = profiles::normalize_name(&args.name).map_err(|e| e.with_field("name"))?;
         {
             let conn = self.app_db.lock()?;
             if profiles::list(&conn)?
                 .iter()
                 .any(|p| profiles::name_key(&p.name) == profiles::name_key(&name))
             {
-                return Err(IpcError::conflict(
-                    "A profile with this name already exists",
-                ));
+                return Err(
+                    IpcError::conflict("A profile with this name already exists")
+                        .with_field("name"),
+                );
             }
         }
         let profile = Profile {
@@ -828,7 +858,7 @@ impl Core {
             )?);
             let conn = self.app_db.lock()?;
             let tx = conn.unchecked_transaction()?;
-            profiles::insert(&tx, &profile)?;
+            profiles::insert(&tx, &profile).map_err(name_conflict)?;
             if profiles::get_setting(&tx, profiles::ACTIVE_PROFILE_KEY)?.is_none() {
                 profiles::set_setting(&tx, profiles::ACTIVE_PROFILE_KEY, Some(&profile.id))?;
             }
@@ -853,7 +883,8 @@ impl Core {
             .name
             .as_deref()
             .map(profiles::normalize_name)
-            .transpose()?;
+            .transpose()
+            .map_err(|e| e.with_field("name"))?;
         let conn = self.app_db.lock()?;
         let mut p = profiles::get(&conn, &args.id)?;
         if let Some(n) = name {
@@ -865,7 +896,7 @@ impl Core {
         if let Some(a) = args.accent {
             p.accent = a;
         }
-        profiles::update(&conn, &p)?;
+        profiles::update(&conn, &p).map_err(name_conflict)?;
         Ok(p)
     }
 
@@ -993,6 +1024,22 @@ impl Core {
     // Tools
     // -----------------------------------------------------------------------------------
 
+    /// The UI view of a tool with `approved` filled in from the stored approval.
+    fn spec_view(&self, spec: &ToolSpec) -> IpcResult<ToolSpecView> {
+        let mut view = spec.view();
+        if !spec.builtin {
+            view.approved = spec.invalid.is_none()
+                && approvals::is_approved(
+                    &*self.app_db.lock()?,
+                    ApprovalKind::CustomTool,
+                    &spec.id,
+                    "",
+                    &spec.fingerprint(),
+                )?;
+        }
+        Ok(view)
+    }
+
     fn cached(&self, db: &Db, spec: &ToolSpec) -> IpcResult<ToolView> {
         let row: Option<(String, Option<String>, Option<String>, String)> = db
             .lock()?
@@ -1004,14 +1051,14 @@ impl Core {
             .optional()?;
         Ok(match row {
             Some((status, version, binary_path, checked_at)) => ToolView {
-                spec: spec.view(),
+                spec: self.spec_view(spec)?,
                 status: serde_json::from_str::<ToolStatus>(&status).ok(),
                 version,
                 binary_path,
                 checked_at: Some(checked_at),
             },
             None => ToolView {
-                spec: spec.view(),
+                spec: self.spec_view(spec)?,
                 status: None,
                 version: None,
                 binary_path: None,
@@ -1110,7 +1157,7 @@ impl Core {
             params![spec.id, to_json(&status)?, version, bin, checked_at],
         )?;
         Ok(ToolView {
-            spec: spec.view(),
+            spec: self.spec_view(&spec)?,
             status: Some(status),
             version,
             binary_path: bin,
@@ -1177,15 +1224,29 @@ impl Core {
         self.deps.opener.open(&url)
     }
 
-    /// `custom_tool_save`: validates and stores (creates or replaces) a custom tool. Its
-    /// config variable must not be used by another custom tool. Saving never runs anything;
-    /// a changed definition needs a new approval before it runs.
+    /// `custom_tool_save`: validates and stores a custom tool. With `replace: false` the id
+    /// must be new (`conflict` on field `id`); with `replace: true` the tool must exist
+    /// (`not_found`) and is replaced. Its config variable must not be used by another custom
+    /// tool. Saving never runs anything; a changed definition needs a new approval before it
+    /// runs.
     ///
     /// # Errors
-    /// `invalid_input`, `conflict` (preset id).
+    /// `invalid_input`, `conflict` (preset or existing id), `not_found`.
     pub fn custom_tool_save(&self, args: CustomToolSaveArgs) -> IpcResult<ToolSpecView> {
         let conn = self.app_db.lock()?;
-        let taken: Vec<String> = Self::custom_tools_in(&conn)?
+        let existing = Self::custom_tools_in(&conn)?;
+        let exists = existing.iter().any(|t| t.id == args.tool.id);
+        if !args.replace && exists {
+            return Err(
+                IpcError::conflict("A custom tool with this id already exists").with_field("id"),
+            );
+        }
+        if args.replace && !exists {
+            return Err(IpcError::not_found(
+                "This custom tool no longer exists. Close the form and add it again",
+            ));
+        }
+        let taken: Vec<String> = existing
             .iter()
             .filter(|t| t.id != args.tool.id && t.invalid.is_none())
             .flat_map(|t| t.config_env.iter().map(|c| c.var.clone()))
@@ -1199,7 +1260,8 @@ impl Core {
              ON CONFLICT(id) DO UPDATE SET spec_json = excluded.spec_json",
             params![spec.id, to_json(&stored)?, now_rfc3339()],
         )?;
-        Ok(spec.view())
+        drop(conn);
+        self.spec_view(&spec)
     }
 
     /// `custom_tool_delete`: deletes the tool, its approval, and in every profile its
@@ -1318,9 +1380,10 @@ impl Core {
     pub fn mcp_list(&self, args: ProfileScopeArgs) -> IpcResult<Vec<McpServerView>> {
         let (_in, p) = self.scope(&args.profile_id)?;
         let db = self.profile_db(&p.id)?;
+        let managed = managed_names(&db)?;
         Ok(Self::load_servers(&db)?
             .iter()
-            .map(StoredServer::view)
+            .map(|s| s.view(&managed))
             .collect())
     }
 
@@ -1342,11 +1405,12 @@ impl Core {
         let profile_id = p.id;
         let db = self.profile_db(&profile_id)?;
         let input = args.server;
-        mcp::validate_name(&input.name)?;
+        let on = |field: &'static str| move |e: IpcError| e.with_field(field);
+        mcp::validate_name(&input.name).map_err(on("name"))?;
         let (transport, command, cmd_args, url, entries, kind) = match &input.transport {
             McpTransportInput::Stdio { command, args, env } => {
-                mcp::validate_command(command)?;
-                mcp::validate_args(args)?;
+                mcp::validate_command(command).map_err(on("command"))?;
+                mcp::validate_args(args).map_err(on("args"))?;
                 mcp::validate_entries(env, EntryKind::Env)?;
                 (
                     "stdio",
@@ -1358,7 +1422,7 @@ impl Core {
                 )
             }
             McpTransportInput::Http { url, headers } => {
-                mcp::validate_url(url)?;
+                mcp::validate_url(url).map_err(on("url"))?;
                 mcp::validate_entries(headers, EntryKind::Header)?;
                 (
                     "http",
@@ -1386,7 +1450,8 @@ impl Core {
                 return Err(IpcError::invalid_input(format!(
                     "Unknown tool '{}'",
                     tools::clean_text(t, 40)
-                )));
+                ))
+                .with_field("tool_ids"));
             }
             if !tool_ids.contains(t) {
                 tool_ids.push(t.clone());
@@ -1404,7 +1469,9 @@ impl Core {
                     return Err(IpcError::invalid_input(format!(
                         "'{}' is set by the shared {} login; remove the variable or stop sharing that login",
                         e.key, t.name
-                    )));
+                    ))
+                    .with_field("env")
+                    .with_entry_key(&e.key));
                 }
             }
         }
@@ -1423,7 +1490,8 @@ impl Core {
         if taken.is_some_and(|t| t != id) {
             return Err(IpcError::conflict(
                 "An MCP server with this name already exists in this profile",
-            ));
+            )
+            .with_field("name"));
         }
         let destination_changed = existing.as_ref().is_some_and(|e| {
             e.transport != transport
@@ -1438,6 +1506,11 @@ impl Core {
         let mut stored_entries = Vec::new();
         let mut to_set: Vec<(String, &SecretString)> = Vec::new();
         let mut new_accounts = BTreeSet::new();
+        let entries_field = if transport == "http" {
+            "headers"
+        } else {
+            "env"
+        };
         for KeyValueInput { key, value } in entries {
             match value {
                 ValueInput::Plain { value } => stored_entries.push(StoredEntry {
@@ -1452,13 +1525,17 @@ impl Core {
                         None if destination_changed => {
                             return Err(IpcError::invalid_input(format!(
                                 "Enter the secret '{key}' again: the server's address or command changed, so the stored value is not sent to it"
-                            )));
+                            ))
+                            .with_field(entries_field)
+                            .with_entry_key(key));
                         }
                         None if old_secret_accounts.contains(&account) => {}
                         None => {
                             return Err(IpcError::invalid_input(format!(
                                 "Enter a value for the secret '{key}'"
-                            )));
+                            ))
+                            .with_field(entries_field)
+                            .with_entry_key(key));
                         }
                     }
                     new_accounts.insert(account);
@@ -1495,7 +1572,7 @@ impl Core {
             }
             written.push(account.clone());
         }
-        let server = StoredServer {
+        let mut server = StoredServer {
             id: id.clone(),
             name: input.name.clone(),
             transport: transport.to_owned(),
@@ -1511,6 +1588,13 @@ impl Core {
                 .map_or_else(now_rfc3339, |s| s.created_at.clone()),
             revision: 0,
         };
+        // Keep the last health when what runs did not change (e.g. a rename or `enabled`).
+        if let Some(e) = &existing
+            && to_set.is_empty()
+            && e.same_executable(&server)
+        {
+            server.health = e.health.clone();
+        }
         if let Err(e) = Self::write_server(&db, &server) {
             rollback(&written);
             return Err(e);
@@ -1518,7 +1602,27 @@ impl Core {
         for stale in old_secret_accounts.difference(&new_accounts) {
             let _ = self.delete_secret(stale);
         }
-        Ok(server.view())
+        Ok(server.view(&managed_names(&db)?))
+    }
+
+    /// `mcp_set_enabled`: changes only `enabled` of a server. Health, revision and every
+    /// other field are kept, so a toggle can never overwrite an edit or a test result.
+    ///
+    /// # Errors
+    /// `not_found`.
+    pub fn mcp_set_enabled(&self, args: McpSetEnabledArgs) -> IpcResult<McpServerView> {
+        let (_in, p) = self.scope(&args.profile_id)?;
+        let db = self.profile_db(&p.id)?;
+        ids::validate_server_id(&args.server_id)?;
+        let _w = lock(&self.mcp_write)?;
+        let n = db.lock()?.execute(
+            "UPDATE mcp_servers SET enabled = ?1, updated_at = ?2 WHERE id = ?3",
+            params![args.enabled, now_rfc3339(), args.server_id],
+        )?;
+        if n == 0 {
+            return Err(IpcError::not_found("MCP server not found"));
+        }
+        Ok(Self::load_server(&db, &args.server_id)?.view(&managed_names(&db)?))
     }
 
     /// `mcp_delete`: deletes the server's secrets, its approval and the server.
@@ -1650,7 +1754,7 @@ impl Core {
             params![to_json(&health)?, s.id, s.revision],
         )?;
         // Deleted meanwhile: not_found. Edited meanwhile: the current row, untouched.
-        Ok(Self::load_server(&db, &s.id)?.view())
+        Ok(Self::load_server(&db, &s.id)?.view(&managed_names(&db)?))
     }
 
     fn resolve_server(
@@ -1747,12 +1851,7 @@ impl Core {
         let (bin, env) = self.claude(&p.id)?;
         let cwd = self.root.profile_dir(&p.id)?;
         let servers = Self::load_servers(&db)?;
-        let managed: BTreeSet<String> = {
-            let conn = db.lock()?;
-            let mut st = conn.prepare("SELECT name FROM mcp_managed ORDER BY name")?;
-            let rows = st.query_map([], |r| r.get::<_, String>(0))?;
-            rows.collect::<Result<_, _>>()?
-        };
+        let managed = managed_names(&db)?;
         let run = |a: &[&str]| {
             let a: Vec<String> = a.iter().map(|s| (*s).to_owned()).collect();
             self.run_tool(&bin, &a, &env, &cwd, self.deps.timeouts.sync)

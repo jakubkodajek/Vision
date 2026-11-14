@@ -21,6 +21,7 @@ import type {
   McpSaveArgs,
   McpServerArgs,
   McpServerView,
+  McpSetEnabledArgs,
   Profile,
   ProfileCreateArgs,
   ProfileDeleteArgs,
@@ -38,6 +39,7 @@ import type {
 export const IPC_COMMANDS = [
   "app_info",
   "bootstrap",
+  "app_open_releases_page",
   "profile_create",
   "profile_update",
   "profile_delete",
@@ -52,6 +54,7 @@ export const IPC_COMMANDS = [
   "custom_tool_delete",
   "mcp_list",
   "mcp_save",
+  "mcp_set_enabled",
   "mcp_delete",
   "mcp_test",
   "mcp_sync_claude",
@@ -79,16 +82,28 @@ const ERROR_CODES: readonly ErrorCode[] = [
 export class VisionIpcError extends Error implements IpcError {
   /** Machine-readable error category. */
   readonly code: ErrorCode;
+  /** The input the error belongs to (see `IpcError.field`), or `null` for the whole form. */
+  readonly field: string | null;
+  /** The env or header key an entry error belongs to, or `null`. */
+  readonly entry_key: string | null;
 
   /**
    * @param code - Error category.
    * @param message - User-safe description.
+   * @param field - Input the error belongs to.
+   * @param entryKey - Env or header key the error belongs to.
    */
-  constructor(code: ErrorCode, message: string) {
+  constructor(code: ErrorCode, message: string, field: string | null = null, entryKey: string | null = null) {
     super(message);
     this.name = "VisionIpcError";
     this.code = code;
+    this.field = field;
+    this.entry_key = entryKey;
   }
+}
+
+function optionalText(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 && value.length <= 64 ? value : null;
 }
 
 /**
@@ -111,7 +126,10 @@ export function isIpcError(value: unknown): value is IpcError {
  */
 export function toIpcError(value: unknown): VisionIpcError {
   if (value instanceof VisionIpcError) return value;
-  if (isIpcError(value)) return new VisionIpcError(value.code, value.message);
+  if (isIpcError(value)) {
+    const v = value as unknown as Record<string, unknown>;
+    return new VisionIpcError(value.code, value.message, optionalText(v.field), optionalText(v.entry_key));
+  }
   if (typeof value === "string" && value.length > 0) return new VisionIpcError("internal", value);
   if (value instanceof Error && value.message.length > 0) {
     return new VisionIpcError("internal", value.message);
@@ -129,9 +147,34 @@ async function call<T>(command: IpcCommand, args?: Record<string, unknown>): Pro
 
 // ---- App -------------------------------------------------------------------------------
 
-/** Product name and core version. Works even when the core failed to start. */
-export function appInfo(): Promise<AppInfo> {
-  return call<AppInfo>("app_info");
+/** The longest version label the UI accepts from the core. */
+export const MAX_VERSION_LENGTH = 64;
+
+/** Whether `value` is an {@link AppInfo} with a non-empty version of at most 64 characters. */
+export function isAppInfo(value: unknown): value is AppInfo {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.name === "string" &&
+    typeof v.version === "string" &&
+    v.version.length > 0 &&
+    v.version.length <= MAX_VERSION_LENGTH
+  );
+}
+
+/**
+ * Product name and core version. Works even when the core failed to start. Rejects with
+ * `internal` when the answer does not have the expected shape.
+ */
+export async function appInfo(): Promise<AppInfo> {
+  const info = await call<unknown>("app_info");
+  if (!isAppInfo(info)) throw new VisionIpcError("internal", "The Vision core sent an unexpected answer");
+  return info;
+}
+
+/** Opens Vision's GitHub Releases page (a fixed address) in the browser. Works without a core. */
+export function appOpenReleasesPage(): Promise<null> {
+  return call<null>("app_open_releases_page");
 }
 
 /**
@@ -215,7 +258,11 @@ export function toolOpenInstallPage(args: ToolIdArgs): Promise<null> {
   return call<null>("tool_open_install_page", args);
 }
 
-/** Creates or replaces a custom tool (app scope). Rejects with `invalid_input` or `conflict`. */
+/**
+ * Adds (`replace: false`; an existing id is a `conflict` on field `id`) or replaces
+ * (`replace: true`; `not_found` when it is gone) a custom tool (app scope). Rejects with
+ * `invalid_input` or `conflict`, with `field` naming the input.
+ */
 export function customToolSave(args: CustomToolSaveArgs): Promise<ToolSpecView> {
   return call<ToolSpecView>("custom_tool_save", args);
 }
@@ -236,11 +283,16 @@ export function mcpList(args: ProfileScopeArgs): Promise<McpServerView[]> {
  * Creates (no `server.id`) or updates an MCP server. A secret entry without `value` keeps
  * the stored value, unless the destination changed (transport, HTTP origin, stdio command
  * or arguments): then every secret must be entered again (`invalid_input`). Health resets
- * to `untested`. Rejects with `invalid_input`, `conflict`, `not_found` or
+ * to `untested` unless what runs is unchanged (for example only the name changed). Rejects with `invalid_input`, `conflict`, `not_found` or
  * `secret_store_unavailable` (then nothing was saved).
  */
 export function mcpSave(args: McpSaveArgs): Promise<McpServerView> {
   return call<McpServerView>("mcp_save", args);
+}
+
+/** Changes only `enabled` of a server; health and every other field are kept. */
+export function mcpSetEnabled(args: McpSetEnabledArgs): Promise<McpServerView> {
+  return call<McpServerView>("mcp_set_enabled", args);
 }
 
 /** Deletes an MCP server and its stored secrets. */

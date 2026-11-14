@@ -50,7 +50,18 @@ fn error_serialises_as_snake_case_code_and_message() {
     let e = IpcError::new(ErrorCode::SchemaTooNew, "m");
     assert_eq!(
         serde_json::to_value(e).unwrap(),
-        json!({"code": "schema_too_new", "message": "m"})
+        json!({"code": "schema_too_new", "message": "m", "field": null, "entry_key": null})
+    );
+}
+
+#[test]
+fn an_error_with_a_field_and_entry_key_serialises_both() {
+    let e = IpcError::invalid_input("m")
+        .with_field("env")
+        .with_entry_key("TOKEN");
+    assert_eq!(
+        serde_json::to_value(e).unwrap(),
+        json!({"code": "invalid_input", "message": "m", "field": "env", "entry_key": "TOKEN"})
     );
 }
 

@@ -149,9 +149,11 @@ Built-in presets (sources in `docs/PLAN.md` §6.3; commands verified 2026-11-14)
     of a built-in or another custom tool, an allowlisted base variable, `ZDOTDIR`, `HOME`,
     or in the families `XDG_*`, `GIT_*`, `PYTHON*`, `NODE_*`, `NPM_*`, `LD_*`, `DYLD_*`,
     `ANTHROPIC_*`, `CLAUDE_*`, `OPENAI_*`, `CODEX_*`, `GH_*`, `GITHUB_*`, `AWS_*`, `AZURE_*`,
-    `CLOUDSDK_*`, `GOOGLE_*`, `SSH_*` (`JAVA_HOME`-style names are fine; `KUBECONFIG` is
-    not accepted). The environment builder refuses a variable set twice instead of letting
-    the later entry win.
+    `CLOUDSDK_*`, `GOOGLE_*`, `SSH_*` (`JAVA_HOME`-style names are fine). The exact
+    well-known names `KUBECONFIG`, `DOCKER_CONFIG` and `HELM_CONFIG_HOME` are accepted
+    although they do not follow the suffix rule (still not when another tool uses them).
+    The environment builder refuses a variable set twice instead of letting the later entry
+    win.
   - A stored tool that no longer validates (rules tightened, or a collision) is listed with
     `invalid: <reason>` and cannot be checked, signed in or out; its variable is not
     exported until it is edited and saved again.
@@ -308,7 +310,9 @@ TypeScript types are generated from the Rust types (`ts-rs`, exported by a test 
 nothing twice (types come from Rust). Every command returns `Result<T, IpcError>`.
 
 ```
-IpcError { code: ErrorCode, message: string }   // message is safe to show; no paths to secrets
+IpcError { code: ErrorCode, message: string,    // message is safe to show; no paths to secrets
+           field: string | null,                // the one input the error belongs to
+           entry_key: string | null }           // env/header entry errors: the entry's key
 ErrorCode = invalid_input | not_found | conflict | not_installed | timeout | io
           | schema_too_new | secret_store_unavailable | terminal_unavailable
           | not_approved | internal
@@ -317,10 +321,34 @@ ErrorCode = invalid_input | not_found | conflict | not_installed | timeout | io
 `not_approved`: the user cancelled the native confirmation of a user-defined command
 (custom tool or stdio MCP server); nothing ran.
 
+`field` is set on every `invalid_input` or `conflict` error that belongs to one input, with
+a stable identifier: profiles `name`; custom tools `id`, `name`, `description`, `binary`,
+`config_var`, `login`, `status`, `logout`, `install_url`; MCP servers `name`, `command`,
+`args`, `url`, `env`, `headers`, `tool_ids`. For an `env` or `headers` error about one entry
+(name rule, duplicate, value, a secret that must be entered again, a variable that redirects
+a shared login) `entry_key` is that entry's key; the value is never echoed. The UI shows an
+error next to its field and falls back to the form-level error display for any field it
+does not render, so no error is dropped.
+
+View fields used by the UI to avoid surprises:
+
+- `ToolSpecView.approved`: always `true` for built-in tools; for a custom tool `true` when
+  the stored approval matches its current definition (and it is not `invalid`). The UI's
+  automatic checks (first visit, Check all, the check after saving, sign-in polling) skip
+  custom tools that are not approved and show "Needs your approval to run"; only an explicit
+  Check, Sign in or Sign out of that tool calls the core, which then asks natively.
+- `McpServerView.synced`: the server's name is tracked as managed by Vision in the
+  profile's Claude Code user scope. `McpServerView.has_secrets`: any env or header value is
+  a secret (such a server is never synced).
+- `mcp_save` keeps the stored health when what runs is unchanged (transport, command, args,
+  URL, entries and shared logins equal and no new secret value), e.g. a rename; otherwise
+  health resets to `untested`.
+
 | Command | Arguments | Returns |
 | --- | --- | --- |
 | `app_info` | | `AppInfo { name, version }` |
 | `bootstrap` | | `Bootstrap { profiles, active_profile_id, platform }` |
+| `app_open_releases_page` | | `null` (opens the fixed GitHub Releases page; works when the core failed to start, e.g. `schema_too_new`) |
 | `profile_create` | `{ name, kind, accent }` | `Profile` |
 | `profile_update` | `{ id, name?, kind?, accent? }` | `Profile` |
 | `profile_delete` | `{ id, confirm_name }` | `null` |
@@ -331,10 +359,11 @@ ErrorCode = invalid_input | not_found | conflict | not_installed | timeout | io
 | `tool_sign_in` | `{ profile_id, tool_id }` | `null` (terminal opened) |
 | `tool_sign_out` | `{ profile_id, tool_id }` | `null` (terminal opened) |
 | `tool_open_install_page` | `{ tool_id }` | `null` (opens the registry's `install_url`) |
-| `custom_tool_save` | `{ tool: CustomToolInput }` | `ToolSpecView` |
+| `custom_tool_save` | `{ tool: CustomToolInput, replace: bool }` | `ToolSpecView` (`replace: false` adds: an existing id is a `conflict` on field `id`; `replace: true` edits: `not_found` when the tool is gone) |
 | `custom_tool_delete` | `{ tool_id }` | `null` |
 | `mcp_list` | `{ profile_id }` | `McpServerView[]` |
 | `mcp_save` | `{ profile_id, server: McpServerInput }` | `McpServerView` |
+| `mcp_set_enabled` | `{ profile_id, server_id, enabled }` | `McpServerView` (changes only `enabled`; health, revision and every other field are kept) |
 | `mcp_delete` | `{ profile_id, server_id }` | `null` |
 | `mcp_test` | `{ profile_id, server_id }` | `McpServerView` |
 | `mcp_sync_claude` | `{ profile_id }` | `SyncReport { synced[], removed[], failed[{name,message}], skipped[{name,reason}] }` |

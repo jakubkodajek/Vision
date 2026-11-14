@@ -87,6 +87,7 @@ describe("custom tool dialog", () => {
           config_kind: "dir",
           login: ["auth", "login"],
         },
+        replace: false,
       },
     ]);
     expect(fake.calls("toolCheck")).toContainEqual({ profile_id: "p_work", tool_id: "my-tool" });

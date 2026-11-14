@@ -34,3 +34,16 @@ pub fn app_info() -> AppInfo {
         version: env!("CARGO_PKG_VERSION"),
     }
 }
+
+/// The only page `app_open_releases_page` opens: Vision's GitHub Releases.
+pub const RELEASES_URL: &str = "https://github.com/jakubkodajek/Vision/releases";
+
+/// `app_open_releases_page`: opens [`RELEASES_URL`] (a fixed address, never one from the
+/// UI). Works without a running [`Core`], so a `schema_too_new` start can point the user at
+/// the latest version.
+///
+/// # Errors
+/// What the opener returns.
+pub fn open_releases_page(opener: &dyn terminal::UrlOpener) -> ipc::IpcResult<()> {
+    opener.open(RELEASES_URL)
+}

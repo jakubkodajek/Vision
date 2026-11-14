@@ -29,7 +29,10 @@ fn valid() -> CustomToolInput {
 fn save_err(tool: CustomToolInput) -> ErrorCode {
     Harness::new()
         .core()
-        .custom_tool_save(CustomToolSaveArgs { tool })
+        .custom_tool_save(CustomToolSaveArgs {
+            tool,
+            replace: false,
+        })
         .unwrap_err()
         .code
 }
@@ -38,7 +41,10 @@ fn save_err(tool: CustomToolInput) -> ErrorCode {
 fn valid_custom_tool_is_saved_as_unverified_exit_code_tool() {
     let v = Harness::new()
         .core()
-        .custom_tool_save(CustomToolSaveArgs { tool: valid() })
+        .custom_tool_save(CustomToolSaveArgs {
+            tool: valid(),
+            replace: false,
+        })
         .unwrap();
     assert_eq!(
         (v.isolation, v.status_parser, v.builtin),
@@ -238,8 +244,11 @@ fn saved_custom_tool_appears_in_every_profiles_list_after_restart() {
     let h = Harness::new();
     let core = h.core();
     let p = create_profile(&core, "Work");
-    core.custom_tool_save(CustomToolSaveArgs { tool: valid() })
-        .unwrap();
+    core.custom_tool_save(CustomToolSaveArgs {
+        tool: valid(),
+        replace: false,
+    })
+    .unwrap();
     drop(core);
     let tools = h
         .core()
@@ -258,8 +267,11 @@ fn custom_tool_status_uses_its_exit_code_and_config_variable() {
     );
     let core = h.core();
     let p = create_profile(&core, "Work");
-    core.custom_tool_save(CustomToolSaveArgs { tool: valid() })
-        .unwrap();
+    core.custom_tool_save(CustomToolSaveArgs {
+        tool: valid(),
+        replace: false,
+    })
+    .unwrap();
     let v = core
         .tool_check(ToolArgs {
             profile_id: p.id.clone(),
@@ -297,8 +309,11 @@ fn deleting_a_custom_tool_removes_it() {
     let h = Harness::new();
     let core = h.core();
     let p = create_profile(&core, "Work");
-    core.custom_tool_save(CustomToolSaveArgs { tool: valid() })
-        .unwrap();
+    core.custom_tool_save(CustomToolSaveArgs {
+        tool: valid(),
+        replace: false,
+    })
+    .unwrap();
     core.custom_tool_delete(ToolIdArgs {
         tool_id: "kubectl".into(),
     })
@@ -320,5 +335,194 @@ fn install_page_opens_the_registry_url() {
     assert_eq!(
         *h.opener.urls.lock().unwrap(),
         vec!["https://cli.github.com/".to_owned()]
+    );
+}
+
+// ---- A1/A2: field attribution and add-versus-replace ----------------------------------------
+
+fn save_field(tool: CustomToolInput) -> Option<String> {
+    Harness::new()
+        .core()
+        .custom_tool_save(CustomToolSaveArgs {
+            tool,
+            replace: false,
+        })
+        .unwrap_err()
+        .field
+}
+
+#[test]
+fn an_invalid_id_names_the_id_field() {
+    assert_eq!(
+        save_field(CustomToolInput {
+            id: "Kube".into(),
+            ..valid()
+        })
+        .as_deref(),
+        Some("id")
+    );
+}
+
+#[test]
+fn a_preset_id_names_the_id_field() {
+    assert_eq!(
+        save_field(CustomToolInput {
+            id: "gh".into(),
+            ..valid()
+        })
+        .as_deref(),
+        Some("id")
+    );
+}
+
+#[test]
+fn an_empty_name_names_the_name_field() {
+    assert_eq!(
+        save_field(CustomToolInput {
+            name: " ".into(),
+            ..valid()
+        })
+        .as_deref(),
+        Some("name")
+    );
+}
+
+#[test]
+fn a_binary_with_a_path_names_the_binary_field() {
+    assert_eq!(
+        save_field(CustomToolInput {
+            binary: "/bin/x".into(),
+            ..valid()
+        })
+        .as_deref(),
+        Some("binary")
+    );
+}
+
+#[test]
+fn an_http_install_page_names_the_install_url_field() {
+    assert_eq!(
+        save_field(CustomToolInput {
+            install_url: Some("http://example.com".into()),
+            ..valid()
+        })
+        .as_deref(),
+        Some("install_url")
+    );
+}
+
+#[test]
+fn an_empty_login_names_the_login_field() {
+    assert_eq!(
+        save_field(CustomToolInput {
+            login: vec![],
+            ..valid()
+        })
+        .as_deref(),
+        Some("login")
+    );
+}
+
+#[test]
+fn a_bad_status_argument_names_the_status_field() {
+    assert_eq!(
+        save_field(CustomToolInput {
+            status: Some(vec!["a\u{7}b".into()]),
+            ..valid()
+        })
+        .as_deref(),
+        Some("status")
+    );
+}
+
+#[test]
+fn a_bad_logout_argument_names_the_logout_field() {
+    assert_eq!(
+        save_field(CustomToolInput {
+            logout: Some(vec![String::new()]),
+            ..valid()
+        })
+        .as_deref(),
+        Some("logout")
+    );
+}
+
+#[test]
+fn adding_an_existing_id_is_a_conflict_on_the_id_field() {
+    let core = Harness::new().core();
+    core.custom_tool_save(CustomToolSaveArgs {
+        tool: valid(),
+        replace: false,
+    })
+    .unwrap();
+    let e = core
+        .custom_tool_save(CustomToolSaveArgs {
+            tool: valid(),
+            replace: false,
+        })
+        .unwrap_err();
+    assert_eq!(
+        (e.code, e.field.as_deref()),
+        (ErrorCode::Conflict, Some("id"))
+    );
+}
+
+#[test]
+fn replacing_an_existing_tool_updates_it() {
+    let core = Harness::new().core();
+    core.custom_tool_save(CustomToolSaveArgs {
+        tool: valid(),
+        replace: false,
+    })
+    .unwrap();
+    let v = core
+        .custom_tool_save(CustomToolSaveArgs {
+            tool: CustomToolInput {
+                name: "Kubernetes".into(),
+                ..valid()
+            },
+            replace: true,
+        })
+        .unwrap();
+    assert_eq!(v.name, "Kubernetes");
+}
+
+#[test]
+fn replacing_a_missing_tool_is_not_found() {
+    let e = Harness::new()
+        .core()
+        .custom_tool_save(CustomToolSaveArgs {
+            tool: valid(),
+            replace: true,
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::NotFound);
+}
+
+#[test]
+fn a_new_custom_tool_is_not_approved() {
+    let v = Harness::new()
+        .core()
+        .custom_tool_save(CustomToolSaveArgs {
+            tool: valid(),
+            replace: false,
+        })
+        .unwrap();
+    assert!(!v.approved);
+}
+
+#[test]
+fn builtin_tools_are_approved() {
+    let h = Harness::new();
+    let core = h.core();
+    let p = create_profile(&core, "Work");
+    let tools = core
+        .tools_list(ProfileScopeArgs { profile_id: p.id })
+        .unwrap();
+    assert!(
+        tools
+            .iter()
+            .filter(|t| t.spec.builtin)
+            .all(|t| t.spec.approved)
     );
 }

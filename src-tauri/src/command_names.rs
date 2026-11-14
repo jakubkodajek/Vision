@@ -5,6 +5,7 @@
 pub const COMMANDS: &[&str] = &[
     "app_info",
     "bootstrap",
+    "app_open_releases_page",
     "profile_create",
     "profile_update",
     "profile_delete",
@@ -19,6 +20,7 @@ pub const COMMANDS: &[&str] = &[
     "custom_tool_delete",
     "mcp_list",
     "mcp_save",
+    "mcp_set_enabled",
     "mcp_delete",
     "mcp_test",
     "mcp_sync_claude",

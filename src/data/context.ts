@@ -50,7 +50,8 @@ export interface VisionActions {
   cancelWait: (profileId: string, toolId: string) => void;
   dismissNotice: (profileId: string, toolId: string) => void;
   openInstallPage: (profileId: string, toolId: string) => void;
-  saveCustomTool: (tool: CustomToolInput) => Promise<ToolSpecView>;
+  /** Adds a custom tool, or with `replace` replaces the existing one with that id. */
+  saveCustomTool: (tool: CustomToolInput, replace?: boolean) => Promise<ToolSpecView>;
   deleteCustomTool: (toolId: string) => Promise<void>;
   ensureMcp: (profileId: string) => void;
   reloadMcp: (profileId: string) => void;

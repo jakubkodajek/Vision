@@ -467,8 +467,8 @@ export function VisionProvider({
         });
       },
       openInstallPage,
-      saveCustomTool: async (tool: CustomToolInput): Promise<ToolSpecView> => {
-        const spec = await client.customToolSave({ tool });
+      saveCustomTool: async (tool: CustomToolInput, replace = false): Promise<ToolSpecView> => {
+        const spec = await client.customToolSave({ tool, replace });
         dispatch({ type: "tools/invalidate" });
         const active = stateRef.current.activeProfileId;
         if (active && stateRef.current.tools[active]?.list.kind === "ready") {

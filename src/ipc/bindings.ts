@@ -18,7 +18,19 @@ code: ErrorCode,
 /**
  * Human-readable, user-safe description.
  */
-message: string, };
+message: string, 
+/**
+ * Stable identifier of the one input an `invalid_input` or `conflict` error belongs to,
+ * so the UI can show it next to that field; `null` for errors about the whole request.
+ * Profiles: `name`. Custom tools: `id`, `name`, `description`, `binary`, `config_var`,
+ * `login`, `status`, `logout`, `install_url`. MCP servers: `name`, `command`, `args`,
+ * `url`, `env`, `headers`, `tool_ids`.
+ */
+field: string | null, 
+/**
+ * For an `env` or `headers` error about one entry: that entry's key (never its value).
+ */
+entry_key: string | null, };
 
 /**
  * Static information about the running core, exposed to the UI.
@@ -253,7 +265,14 @@ builtin: boolean,
  * Such a tool is listed but cannot be checked, signed in or out, and its variable is not
  * exported, until it is edited and saved again. Always `null` for valid tools.
  */
-invalid: string | null, };
+invalid: string | null, 
+/**
+ * Whether running this tool's commands needs no confirmation: always `true` for
+ * built-in tools; for a custom tool, `true` when the stored approval matches its current
+ * definition. Automatic checks in the UI skip tools that are not approved, so a native
+ * confirmation only ever follows an explicit click.
+ */
+approved: boolean, };
 
 /**
  * Sign-in status of a tool in a profile.
@@ -324,7 +343,7 @@ tool_id: string, };
  */
 export type CustomToolInput = { 
 /**
- * Tool id, `^[a-z][a-z0-9_-]{0,31}$`, not a preset id. Saving an existing id updates it.
+ * Tool id, `^[a-z][a-z0-9_-]{0,31}$`, not a preset id.
  */
 id: string, 
 /**
@@ -346,7 +365,8 @@ binary: string,
 install_url?: string, 
 /**
  * Config variable name: `^[A-Z][A-Z0-9_]{0,47}$` ending in `_CONFIG_DIR`,
- * `_CONFIG_HOME`, `_HOME`, `_CONFIG`, `_CONFIG_FILE` or `_DIR`; not a variable of a
+ * `_CONFIG_HOME`, `_HOME`, `_CONFIG`, `_CONFIG_FILE` or `_DIR`, or exactly one of the
+ * well-known names `KUBECONFIG`, `DOCKER_CONFIG`, `HELM_CONFIG_HOME`; not a variable of a
  * built-in or another custom tool, not an allowlisted base variable, and not in the
  * families `XDG_*`, `GIT_*`, `PYTHON*`, `NODE_*`, `NPM_*`, `LD_*`, `DYLD_*`,
  * `ANTHROPIC_*`, `CLAUDE_*`, `OPENAI_*`, `CODEX_*`, `GH_*`, `GITHUB_*`, `AWS_*`,
@@ -377,7 +397,12 @@ export type CustomToolSaveArgs = {
 /**
  * The tool.
  */
-tool: CustomToolInput, };
+tool: CustomToolInput, 
+/**
+ * `false` to add: an existing id is a `conflict` on field `id`. `true` to edit: the tool
+ * must exist (`not_found` otherwise) and is replaced.
+ */
+replace: boolean, };
 
 /**
  * A value entered for an env variable or header.
@@ -580,7 +605,17 @@ enabled: boolean,
 /**
  * Last health check.
  */
-health: McpHealth, };
+health: McpHealth, 
+/**
+ * Whether this server's name is tracked as managed by Vision in the profile's Claude
+ * Code configuration (it was synced and not removed since).
+ */
+synced: boolean, 
+/**
+ * Whether any env variable or header value is stored as a secret (such a server is
+ * never synced to Claude Code).
+ */
+has_secrets: boolean, };
 
 /**
  * Arguments of `mcp_save`.
@@ -594,6 +629,23 @@ profile_id: string,
  * Server.
  */
 server: McpServerInput, };
+
+/**
+ * Arguments of `mcp_set_enabled`.
+ */
+export type McpSetEnabledArgs = { 
+/**
+ * Profile id.
+ */
+profile_id: string, 
+/**
+ * Server id.
+ */
+server_id: string, 
+/**
+ * New value of `enabled`; nothing else changes (health and revision are kept).
+ */
+enabled: boolean, };
 
 /**
  * Arguments of `mcp_delete`, `mcp_test`, `mcp_authorize`.

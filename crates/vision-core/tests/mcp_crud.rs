@@ -756,6 +756,7 @@ fn custom_tool(core: &Core) {
             status: None,
             logout: None,
         },
+        replace: false,
     })
     .unwrap();
 }
@@ -885,4 +886,95 @@ fn a_saved_secret_is_indexed_under_its_profile() {
             .map(|a| (a, pid.clone()))
             .collect::<Vec<_>>()
     );
+}
+
+// ---- A1: errors name the field (and the entry) they belong to -----------------------------
+
+fn field_of(server: McpServerInput) -> (Option<String>, Option<String>) {
+    let (_h, core, pid) = setup();
+    let e = save(&core, &pid, server).unwrap_err();
+    (e.field, e.entry_key)
+}
+
+#[test]
+fn a_bad_name_names_the_name_field() {
+    assert_eq!(field_of(stdio("a b", vec![])).0.as_deref(), Some("name"));
+}
+
+#[test]
+fn a_duplicate_name_names_the_name_field() {
+    let (_h, core, pid) = setup();
+    save(&core, &pid, stdio("dup", vec![])).unwrap();
+    let e = save(&core, &pid, stdio("dup", vec![])).unwrap_err();
+    assert_eq!(
+        (e.code, e.field.as_deref()),
+        (ErrorCode::Conflict, Some("name"))
+    );
+}
+
+#[test]
+fn a_bad_url_names_the_url_field() {
+    assert_eq!(
+        field_of(http("remote", "http://example.com/mcp", vec![]))
+            .0
+            .as_deref(),
+        Some("url")
+    );
+}
+
+#[test]
+fn a_bad_command_names_the_command_field() {
+    let mut s = stdio("cmd", vec![]);
+    s.transport = McpTransportInput::Stdio {
+        command: "npx -y".into(),
+        args: vec![],
+        env: vec![],
+    };
+    assert_eq!(field_of(s).0.as_deref(), Some("command"));
+}
+
+#[test]
+fn a_bad_argument_names_the_args_field() {
+    let mut s = stdio("args", vec![]);
+    s.transport = McpTransportInput::Stdio {
+        command: "npx".into(),
+        args: vec!["a\nb".into()],
+        env: vec![],
+    };
+    assert_eq!(field_of(s).0.as_deref(), Some("args"));
+}
+
+#[test]
+fn a_duplicate_env_key_names_the_env_field_and_the_key() {
+    assert_eq!(
+        field_of(stdio("env", vec![plain("A", "1"), plain("A", "2")])),
+        (Some("env".to_owned()), Some("A".to_owned()))
+    );
+}
+
+#[test]
+fn a_reserved_header_names_the_headers_field_and_the_key() {
+    assert_eq!(
+        field_of(http(
+            "hdr",
+            "https://example.com/mcp",
+            vec![plain("Content-Type", "x")]
+        )),
+        (Some("headers".to_owned()), Some("Content-Type".to_owned()))
+    );
+}
+
+#[test]
+fn a_new_secret_without_a_value_names_its_entry() {
+    assert_eq!(
+        field_of(stdio("sec", vec![secret("TOKEN", None)])),
+        (Some("env".to_owned()), Some("TOKEN".to_owned()))
+    );
+}
+
+#[test]
+fn an_unknown_shared_login_names_the_tool_ids_field() {
+    let mut s = stdio("logins", vec![]);
+    s.tool_ids = vec!["nope".into()];
+    assert_eq!(field_of(s).0.as_deref(), Some("tool_ids"));
 }

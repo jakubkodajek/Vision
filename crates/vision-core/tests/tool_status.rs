@@ -646,8 +646,11 @@ fn a_check_finishing_after_the_tool_was_edited_caches_nothing() {
         status: Some(vec!["status".into()]),
         logout: None,
     };
-    core.custom_tool_save(CustomToolSaveArgs { tool: tool.clone() })
-        .unwrap();
+    core.custom_tool_save(CustomToolSaveArgs {
+        tool: tool.clone(),
+        replace: false,
+    })
+    .unwrap();
     let result = std::thread::scope(|scope| {
         let checking = scope.spawn(|| {
             core.tool_check(ToolArgs {
@@ -664,6 +667,7 @@ fn a_check_finishing_after_the_tool_was_edited_caches_nothing() {
                 status: Some(vec!["whoami".into()]),
                 ..tool
             },
+            replace: true,
         })
         .unwrap();
         checking.join().unwrap()

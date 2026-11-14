@@ -10,9 +10,9 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use vision_core::approvals::Confirmer;
 use vision_core::ipc::{
     Accent, AppInfo, Bootstrap, CustomToolInput, CustomToolSaveArgs, McpSaveArgs, McpServerArgs,
-    McpServerInput, McpServerView, Profile, ProfileCreateArgs, ProfileDeleteArgs, ProfileKind,
-    ProfileScopeArgs, ProfileSetActiveArgs, ProfileUpdateArgs, SyncReport, ToolArgs, ToolIdArgs,
-    ToolSpecView, ToolView,
+    McpServerInput, McpServerView, McpSetEnabledArgs, Profile, ProfileCreateArgs,
+    ProfileDeleteArgs, ProfileKind, ProfileScopeArgs, ProfileSetActiveArgs, ProfileUpdateArgs,
+    SyncReport, ToolArgs, ToolIdArgs, ToolSpecView, ToolView,
 };
 use vision_core::{Core, CoreDeps, IpcError};
 
@@ -57,6 +57,20 @@ where
 #[tauri::command]
 fn app_info() -> AppInfo {
     vision_core::app_info()
+}
+
+/// Opens Vision's GitHub Releases page (a fixed address). Works even if the core failed to
+/// start, so a `schema_too_new` start can point at the latest version.
+#[tauri::command]
+async fn app_open_releases_page() -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let opener = vision_core::terminal::SystemUrlOpener {
+            gui_env: std::env::vars_os().collect(),
+        };
+        vision_core::open_releases_page(&opener)
+    })
+    .await
+    .map_err(|_| IpcError::internal("The operation was interrupted"))?
 }
 
 /// Profiles, active profile id and platform.
@@ -196,14 +210,15 @@ async fn tool_open_install_page(state: State<'_, AppState>, tool_id: String) -> 
     .await
 }
 
-/// Creates or replaces a custom tool.
+/// Adds (`replace: false`) or replaces (`replace: true`) a custom tool.
 #[tauri::command(rename_all = "snake_case")]
 async fn custom_tool_save(
     state: State<'_, AppState>,
     tool: CustomToolInput,
+    replace: bool,
 ) -> CmdResult<ToolSpecView> {
     with_core(state, move |c| {
-        c.custom_tool_save(CustomToolSaveArgs { tool })
+        c.custom_tool_save(CustomToolSaveArgs { tool, replace })
     })
     .await
 }
@@ -229,6 +244,24 @@ async fn mcp_save(
 ) -> CmdResult<McpServerView> {
     with_core(state, move |c| {
         c.mcp_save(McpSaveArgs { profile_id, server })
+    })
+    .await
+}
+
+/// Changes only whether an MCP server is enabled.
+#[tauri::command(rename_all = "snake_case")]
+async fn mcp_set_enabled(
+    state: State<'_, AppState>,
+    profile_id: String,
+    server_id: String,
+    enabled: bool,
+) -> CmdResult<McpServerView> {
+    with_core(state, move |c| {
+        c.mcp_set_enabled(McpSetEnabledArgs {
+            profile_id,
+            server_id,
+            enabled,
+        })
     })
     .await
 }
@@ -370,6 +403,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             bootstrap,
+            app_open_releases_page,
             profile_create,
             profile_update,
             profile_delete,
@@ -384,6 +418,7 @@ pub fn run() {
             custom_tool_delete,
             mcp_list,
             mcp_save,
+            mcp_set_enabled,
             mcp_delete,
             mcp_test,
             mcp_sync_claude,

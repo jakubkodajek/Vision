@@ -461,6 +461,7 @@ fn a_custom_tool_name_with_a_direction_override_is_rejected() {
                 status: None,
                 logout: None,
             },
+            replace: false,
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::InvalidInput);
@@ -718,4 +719,52 @@ fn a_secret_saved_while_the_profile_is_deleted_is_not_orphaned() {
         let _ = saving.join().unwrap();
     });
     assert!(h.secrets.accounts().is_empty());
+}
+
+// ---- A1: profile errors name the name field -------------------------------------------------
+
+#[test]
+fn an_empty_profile_name_names_the_name_field() {
+    let e = Harness::new()
+        .core()
+        .profile_create(vision_core::ipc::ProfileCreateArgs {
+            name: "  ".into(),
+            kind: vision_core::ipc::ProfileKind::Work,
+            accent: vision_core::ipc::Accent::Iris,
+        })
+        .unwrap_err();
+    assert_eq!(e.field.as_deref(), Some("name"));
+}
+
+#[test]
+fn a_duplicate_profile_name_names_the_name_field() {
+    let core = Harness::new().core();
+    common::create_profile(&core, "Work");
+    let e = core
+        .profile_create(vision_core::ipc::ProfileCreateArgs {
+            name: "work".into(),
+            kind: vision_core::ipc::ProfileKind::Work,
+            accent: vision_core::ipc::Accent::Iris,
+        })
+        .unwrap_err();
+    assert_eq!(
+        (e.code, e.field.as_deref()),
+        (vision_core::ErrorCode::Conflict, Some("name"))
+    );
+}
+
+#[test]
+fn a_duplicate_name_on_rename_names_the_name_field() {
+    let core = Harness::new().core();
+    common::create_profile(&core, "Work");
+    let p = common::create_profile(&core, "Home");
+    let e = core
+        .profile_update(vision_core::ipc::ProfileUpdateArgs {
+            id: p.id,
+            name: Some("WORK".into()),
+            kind: None,
+            accent: None,
+        })
+        .unwrap_err();
+    assert_eq!(e.field.as_deref(), Some("name"));
 }

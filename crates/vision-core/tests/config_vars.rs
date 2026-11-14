@@ -30,6 +30,14 @@ fn tool(id: &str, var: &str) -> CustomToolInput {
 fn save(core: &Core, id: &str, var: &str) -> IpcResult<ToolSpecView> {
     core.custom_tool_save(CustomToolSaveArgs {
         tool: tool(id, var),
+        replace: false,
+    })
+}
+
+fn resave(core: &Core, id: &str, var: &str) -> IpcResult<ToolSpecView> {
+    core.custom_tool_save(CustomToolSaveArgs {
+        tool: tool(id, var),
+        replace: true,
     })
 }
 
@@ -156,7 +164,7 @@ fn a_variable_of_another_custom_tool_is_rejected() {
 fn resaving_a_custom_tool_keeps_its_own_variable() {
     let core = Harness::new().core();
     save(&core, "first", "SHARED_CONFIG_DIR").unwrap();
-    assert!(save(&core, "first", "SHARED_CONFIG_DIR").is_ok());
+    assert!(resave(&core, "first", "SHARED_CONFIG_DIR").is_ok());
 }
 
 #[test]
@@ -186,4 +194,42 @@ fn an_mcp_variable_that_redirects_a_shared_login_is_rejected() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::InvalidInput);
+}
+
+// ---- A6: well-known names outside the suffix rule ----------------------------------------
+
+#[test]
+fn kubeconfig_is_accepted() {
+    assert_eq!(code("KUBECONFIG"), None);
+}
+
+#[test]
+fn docker_config_is_accepted() {
+    assert_eq!(code("DOCKER_CONFIG"), None);
+}
+
+#[test]
+fn helm_config_home_is_accepted() {
+    assert_eq!(code("HELM_CONFIG_HOME"), None);
+}
+
+#[test]
+fn a_name_that_only_contains_kubeconfig_is_rejected() {
+    assert_eq!(code("MYKUBECONFIG"), Some(ErrorCode::InvalidInput));
+}
+
+#[test]
+fn kubeconfig_used_by_another_custom_tool_is_rejected() {
+    let core = Harness::new().core();
+    save(&core, "first", "KUBECONFIG").unwrap();
+    assert_eq!(
+        save(&core, "second", "KUBECONFIG").unwrap_err().code,
+        ErrorCode::InvalidInput
+    );
+}
+
+#[test]
+fn a_config_variable_error_names_the_config_var_field() {
+    let e = save(&Harness::new().core(), "mytool", "HOME").unwrap_err();
+    assert_eq!(e.field.as_deref(), Some("config_var"));
 }

@@ -129,11 +129,18 @@ pub enum EntryKind {
 
 /// Validates env/header entries: names, duplicates, value characters.
 ///
+/// The error names the list (`env` or `headers`) in [`IpcError::field`] and, for an entry
+/// error, the entry's key in [`IpcError::entry_key`].
+///
 /// # Errors
 /// `invalid_input` for the first invalid entry.
 pub fn validate_entries(entries: &[KeyValueInput], kind: EntryKind) -> IpcResult<()> {
+    let field = match kind {
+        EntryKind::Env => "env",
+        EntryKind::Header => "headers",
+    };
     if entries.len() > 64 {
-        return Err(IpcError::invalid_input("Use at most 64 entries"));
+        return Err(IpcError::invalid_input("Use at most 64 entries").with_field(field));
     }
     let mut seen = std::collections::BTreeSet::new();
     for e in entries {
@@ -162,7 +169,9 @@ pub fn validate_entries(entries: &[KeyValueInput], kind: EntryKind) -> IpcResult
                 EntryKind::Header => {
                     "Header names use letters, digits, '-' or '_' (Accept, Content-Type and MCP headers are set by Vision)"
                 }
-            }));
+            })
+            .with_field(field)
+            .with_entry_key(k));
         }
         let norm = if kind == EntryKind::Header {
             k.to_ascii_lowercase()
@@ -170,7 +179,9 @@ pub fn validate_entries(entries: &[KeyValueInput], kind: EntryKind) -> IpcResult
             k.to_owned()
         };
         if !seen.insert(norm) {
-            return Err(IpcError::invalid_input(format!("'{k}' is listed twice")));
+            return Err(IpcError::invalid_input(format!("'{k}' is listed twice"))
+                .with_field(field)
+                .with_entry_key(k));
         }
         let value = match &e.value {
             ValueInput::Plain { value } => Some(value.as_str()),
@@ -186,7 +197,9 @@ pub fn validate_entries(entries: &[KeyValueInput], kind: EntryKind) -> IpcResult
                 // Never echo the value: it may be a secret.
                 return Err(IpcError::invalid_input(format!(
                     "The value of '{k}' is too long or contains characters that are not allowed"
-                )));
+                ))
+                .with_field(field)
+                .with_entry_key(k));
             }
         }
     }

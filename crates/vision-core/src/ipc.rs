@@ -54,6 +54,16 @@ pub struct IpcError {
     pub code: ErrorCode,
     /// Human-readable, user-safe description.
     pub message: String,
+    /// Stable identifier of the one input an `invalid_input` or `conflict` error belongs to,
+    /// so the UI can show it next to that field; `null` for errors about the whole request.
+    /// Profiles: `name`. Custom tools: `id`, `name`, `description`, `binary`, `config_var`,
+    /// `login`, `status`, `logout`, `install_url`. MCP servers: `name`, `command`, `args`,
+    /// `url`, `env`, `headers`, `tool_ids`.
+    #[serde(default)]
+    pub field: Option<String>,
+    /// For an `env` or `headers` error about one entry: that entry's key (never its value).
+    #[serde(default)]
+    pub entry_key: Option<String>,
 }
 
 impl IpcError {
@@ -63,7 +73,23 @@ impl IpcError {
         Self {
             code,
             message: message.into(),
+            field: None,
+            entry_key: None,
         }
+    }
+
+    /// The same error, attributed to input `field` (see [`IpcError::field`]).
+    #[must_use]
+    pub fn with_field(mut self, field: &str) -> Self {
+        self.field = Some(field.to_owned());
+        self
+    }
+
+    /// The same error, attributed to the `env` or `headers` entry with key `key`.
+    #[must_use]
+    pub fn with_entry_key(mut self, key: &str) -> Self {
+        self.entry_key = Some(key.to_owned());
+        self
     }
 
     /// Validation failure.
@@ -366,6 +392,11 @@ pub struct ToolSpecView {
     /// Such a tool is listed but cannot be checked, signed in or out, and its variable is not
     /// exported, until it is edited and saved again. Always `null` for valid tools.
     pub invalid: Option<String>,
+    /// Whether running this tool's commands needs no confirmation: always `true` for
+    /// built-in tools; for a custom tool, `true` when the stored approval matches its current
+    /// definition. Automatic checks in the UI skip tools that are not approved, so a native
+    /// confirmation only ever follows an explicit click.
+    pub approved: bool,
 }
 
 /// Sign-in status of a tool in a profile.
@@ -426,7 +457,7 @@ pub struct ToolIdArgs {
 /// A user-defined tool (app scope). Its status parser is `exit_code`, isolation `unverified`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct CustomToolInput {
-    /// Tool id, `^[a-z][a-z0-9_-]{0,31}$`, not a preset id. Saving an existing id updates it.
+    /// Tool id, `^[a-z][a-z0-9_-]{0,31}$`, not a preset id.
     pub id: String,
     /// Display name, 1 to 40 characters (same text rules as profile names).
     pub name: String,
@@ -442,7 +473,8 @@ pub struct CustomToolInput {
     #[ts(optional)]
     pub install_url: Option<String>,
     /// Config variable name: `^[A-Z][A-Z0-9_]{0,47}$` ending in `_CONFIG_DIR`,
-    /// `_CONFIG_HOME`, `_HOME`, `_CONFIG`, `_CONFIG_FILE` or `_DIR`; not a variable of a
+    /// `_CONFIG_HOME`, `_HOME`, `_CONFIG`, `_CONFIG_FILE` or `_DIR`, or exactly one of the
+    /// well-known names `KUBECONFIG`, `DOCKER_CONFIG`, `HELM_CONFIG_HOME`; not a variable of a
     /// built-in or another custom tool, not an allowlisted base variable, and not in the
     /// families `XDG_*`, `GIT_*`, `PYTHON*`, `NODE_*`, `NPM_*`, `LD_*`, `DYLD_*`,
     /// `ANTHROPIC_*`, `CLAUDE_*`, `OPENAI_*`, `CODEX_*`, `GH_*`, `GITHUB_*`, `AWS_*`,
@@ -467,6 +499,9 @@ pub struct CustomToolInput {
 pub struct CustomToolSaveArgs {
     /// The tool.
     pub tool: CustomToolInput,
+    /// `false` to add: an existing id is a `conflict` on field `id`. `true` to edit: the tool
+    /// must exist (`not_found` otherwise) and is replaced.
+    pub replace: bool,
 }
 
 // ---------------------------------------------------------------------------------------
@@ -656,6 +691,12 @@ pub struct McpServerView {
     pub enabled: bool,
     /// Last health check.
     pub health: McpHealth,
+    /// Whether this server's name is tracked as managed by Vision in the profile's Claude
+    /// Code configuration (it was synced and not removed since).
+    pub synced: bool,
+    /// Whether any env variable or header value is stored as a secret (such a server is
+    /// never synced to Claude Code).
+    pub has_secrets: bool,
 }
 
 /// Arguments of `mcp_save`.
@@ -665,6 +706,17 @@ pub struct McpSaveArgs {
     pub profile_id: String,
     /// Server.
     pub server: McpServerInput,
+}
+
+/// Arguments of `mcp_set_enabled`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
+pub struct McpSetEnabledArgs {
+    /// Profile id.
+    pub profile_id: String,
+    /// Server id.
+    pub server_id: String,
+    /// New value of `enabled`; nothing else changes (health and revision are kept).
+    pub enabled: bool,
 }
 
 /// Arguments of `mcp_delete`, `mcp_test`, `mcp_authorize`.
@@ -769,6 +821,7 @@ pub fn typescript_bindings() -> String {
     decl::<McpHealth>(&mut out, &cfg);
     decl::<McpServerView>(&mut out, &cfg);
     decl::<McpSaveArgs>(&mut out, &cfg);
+    decl::<McpSetEnabledArgs>(&mut out, &cfg);
     decl::<McpServerArgs>(&mut out, &cfg);
     decl::<SyncFailure>(&mut out, &cfg);
     decl::<SyncSkip>(&mut out, &cfg);

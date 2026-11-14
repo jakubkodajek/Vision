@@ -3,8 +3,13 @@
  * no Tauri core. Never part of a production build: `main.tsx` imports it only behind
  * `import.meta.env.DEV`, and the build is checked for {@link DEV_MOCK_MARKER}.
  *
- * Scenarios via the URL: `?mock=welcome` (no profiles), `?mock=error` (schema_too_new),
- * `?mock=slow` (long latency); default is two profiles with mixed states.
+ * Scenarios via the URL, comma-separated: `?mock=welcome` (no profiles), `?mock=error`
+ * (schema_too_new), `?mock=slow` (long latency), `?mock=decline` (every confirmation of a
+ * custom tool or stdio server is declined: `not_approved`), `?mock=invalid-tool` (a stored
+ * custom tool that no longer validates), `?mock=unapproved-tool` (a custom tool never
+ * approved), `?mock=fail-<command>` (that command fails, e.g. `fail-toolSignIn`,
+ * `fail-mcpSave`), `?mock=no-core-info` (`app_info` fails). Default: two profiles with mixed
+ * states; syncing skips servers with secret values.
  */
 import type { VisionClient } from "../data/client";
 import type {
@@ -34,6 +39,7 @@ function spec(partial: Partial<ToolSpecView> & Pick<ToolSpecView, "id" | "name" 
     isolation: "unverified",
     builtin: true,
     invalid: null,
+    approved: true,
     ...partial,
   };
 }
@@ -131,17 +137,46 @@ function makeServer(
       server_version: null,
       checked_at: null,
     },
+    synced: false,
+    has_secrets: false,
     ...partial,
   };
 }
+
+function hasSecret(view: McpServerView): boolean {
+  const entries = view.transport.kind === "stdio" ? view.transport.env : view.transport.headers;
+  return entries.some((e) => e.value.kind === "secret");
+}
+
+/** Scenario switches from `?mock=a,b,c`. */
+function flags(): Set<string> {
+  return new Set((new URLSearchParams(window.location.search).get("mock") ?? "").split(",").filter(Boolean));
+}
+
+const FAILURES: Partial<Record<keyof VisionClient, [VisionIpcError["code"], string]>> = {
+  toolSignIn: ["terminal_unavailable", "No terminal app could be opened"],
+  toolSignOut: ["terminal_unavailable", "No terminal app could be opened"],
+  toolCheck: ["timeout", "The status command did not finish in 20 seconds"],
+  toolOpenInstallPage: ["internal", "The browser could not be started"],
+  mcpSave: ["secret_store_unavailable", "The system credential store is not available, so nothing was saved"],
+  mcpSetEnabled: ["io", "The profile database could not be written"],
+  mcpTest: ["not_approved", "You declined to run this command"],
+  mcpDelete: ["secret_store_unavailable", "The system credential store is not available"],
+  mcpSyncClaude: ["not_installed", "Claude Code is not installed"],
+  mcpAuthorize: ["terminal_unavailable", "No terminal app could be opened"],
+  profileDelete: ["io", "The profile was removed but some of its files could not be deleted: permission denied"],
+  profileOpenTerminal: ["terminal_unavailable", "No terminal app could be opened"],
+  profileSetActive: ["io", "The setting could not be saved"],
+  customToolSave: ["invalid_input", "This config variable is used by the system or by another program, so a custom tool cannot set it"],
+  customToolDelete: ["io", "File system error: permission denied"],
+};
 
 function seed(): {
   profiles: Profile[];
   active: string | null;
   data: Map<string, ProfileData>;
 } {
-  const scenario = new URLSearchParams(window.location.search).get("mock");
-  if (scenario === "welcome") return { profiles: [], active: null, data: new Map() };
+  if (flags().has("welcome")) return { profiles: [], active: null, data: new Map() };
   const profiles: Profile[] = [
     {
       id: "p_work00000001",
@@ -218,6 +253,7 @@ function seed(): {
             { key: "API_TOKEN", value: { kind: "secret", has_value: true } },
           ],
         },
+        has_secrets: true,
         tool_ids: ["gh"],
         health: {
           status: "ok",
@@ -248,12 +284,7 @@ function seed(): {
         transport: {
           kind: "http",
           url: "https://mcp.linear.app/mcp",
-          headers: [
-            {
-              key: "Authorization",
-              value: { kind: "secret", has_value: true },
-            },
-          ],
+          headers: [],
         },
         health: {
           status: "needs_auth",
@@ -313,24 +344,63 @@ function entryView(e: KeyValueInput, old: readonly KeyValueView[]): KeyValueView
 /** Creates the dev mock client with realistic seeded data. */
 export function createDevMockClient(): VisionClient {
   console.info(`[${DEV_MOCK_MARKER}] Vision is running in a browser with mock data; nothing reaches a core.`);
-  const scenario = new URLSearchParams(window.location.search).get("mock");
-  const latency = scenario === "slow" ? 2500 : 450;
+  const on = flags();
+  const latency = on.has("slow") ? 2500 : 450;
   const state = seed();
   const custom: ToolSpecView[] = [];
+  if (on.has("invalid-tool"))
+    custom.push(
+      spec({
+        id: "legacy",
+        name: "Legacy tool",
+        binary: "legacy",
+        description: "Saved by an older version of Vision.",
+        config_env: [{ var: "BROWSER", kind: "dir", rel: "" }],
+        builtin: false,
+        approved: false,
+        invalid:
+          "The config variable must be an upper-case name ending in _CONFIG_DIR, _CONFIG_HOME, _HOME, _CONFIG, _CONFIG_FILE or _DIR, like MYTOOL_CONFIG_DIR",
+      }),
+    );
+  if (on.has("unapproved-tool"))
+    custom.push(
+      spec({
+        id: "kubectl",
+        name: "kubectl",
+        binary: "kubectl",
+        description: "Kubernetes clusters, one kubeconfig per profile.",
+        config_env: [{ var: "KUBECONFIG", kind: "file", rel: "config" }],
+        login: ["config", "set-credentials"],
+        status: ["config", "current-context"],
+        logout: null,
+        builtin: false,
+        approved: false,
+      }),
+    );
   let counter = 0;
+  const managed = new Map<string, Set<string>>();
 
-  const wait = <T>(value: () => T, ms = latency): Promise<T> =>
+  const wait = <T>(value: () => T, ms = latency, command?: keyof VisionClient): Promise<T> =>
     new Promise((resolve, reject) => {
       setTimeout(() => {
         try {
+          const failure = command && on.has(`fail-${command}`) ? FAILURES[command] : undefined;
+          if (failure) throw new VisionIpcError(failure[0], failure[1]);
           resolve(value());
         } catch (e) {
           reject(e instanceof Error ? e : new Error(String(e)));
         }
       }, ms);
     });
-  const fail = (code: VisionIpcError["code"], message: string): never => {
-    throw new VisionIpcError(code, message);
+  const fail = (code: VisionIpcError["code"], message: string, field: string | null = null): never => {
+    throw new VisionIpcError(code, message, field);
+  };
+  /** A confirmation of a user-defined command: declined with `?mock=decline`. */
+  const confirm = (t: ToolSpecView) => {
+    if (t.builtin || t.approved) return;
+    if (on.has("decline")) fail("not_approved", "You declined to run this command");
+    const i = custom.findIndex((c) => c.id === t.id);
+    if (i >= 0) custom[i] = { ...t, approved: true };
   };
   const profileData = (id: string): ProfileData => {
     const d = state.data.get(id);
@@ -355,10 +425,15 @@ export function createDevMockClient(): VisionClient {
   const findTool = (id: string) => allTools().find((t) => t.id === id) ?? fail("not_found", "Tool not found");
 
   return {
-    appInfo: () => wait(() => ({ name: "Vision", version: "0.1.0-dev" }), 50),
+    appInfo: () =>
+      wait(() => {
+        if (on.has("no-core-info")) fail("internal", "The Vision core did not answer");
+        return { name: "Vision", version: "0.1.0-dev" };
+      }, 50),
+    appOpenReleasesPage: () => wait(() => null, 100, "appOpenReleasesPage"),
     bootstrap: () =>
       wait(() => {
-        if (scenario === "error")
+        if (on.has("error"))
           fail(
             "schema_too_new",
             "The database was written by a newer version of Vision (schema 7, this build knows 3)",
@@ -373,7 +448,7 @@ export function createDevMockClient(): VisionClient {
       wait(() => {
         const name = args.name.trim();
         if (state.profiles.some((p) => p.name.toLowerCase() === name.toLowerCase()))
-          fail("conflict", "A profile with this name already exists");
+          fail("conflict", "A profile with this name already exists", "name");
         counter += 1;
         const p: Profile = {
           id: `p_new${String(counter).padStart(9, "0")}`,
@@ -409,19 +484,21 @@ export function createDevMockClient(): VisionClient {
         state.data.delete(p.id);
         if (state.active === p.id) state.active = state.profiles[0]?.id ?? null;
         return null;
-      }),
+      }, latency, "profileDelete"),
     profileSetActive: (args) =>
       wait(() => {
         state.active = args.id;
         return null;
-      }, 60),
-    profileOpenTerminal: () => wait(() => null, 200),
+      }, 60, "profileSetActive"),
+    profileOpenTerminal: () => wait(() => null, 200, "profileOpenTerminal"),
     toolsList: (args) => wait(() => allTools().map((t) => toolView(args.profile_id, t)), 150),
     toolCheck: (args) =>
       wait(
         () => {
           const d = profileData(args.profile_id);
           const t = findTool(args.tool_id);
+          if (t.invalid) fail("invalid_input", `${t.name} cannot be used until it is edited: ${t.invalid}`);
+          confirm(t);
           const c = d.tools.get(t.id) ?? {
             status: { status: "signed_out" },
             version: "1.0.0",
@@ -441,29 +518,44 @@ export function createDevMockClient(): VisionClient {
           }
           if (c.status === null) c.status = { status: "signed_out" };
           d.tools.set(t.id, c);
-          return toolView(args.profile_id, t);
+          return toolView(args.profile_id, findTool(t.id));
         },
         latency + Math.round(Math.random() * 900),
+        "toolCheck",
       ),
     toolSignIn: (args) =>
-      wait(() => {
-        profileData(args.profile_id).signingIn.set(args.tool_id, 3);
-        return null;
-      }),
+      wait(
+        () => {
+          confirm(findTool(args.tool_id));
+          profileData(args.profile_id).signingIn.set(args.tool_id, 3);
+          return null;
+        },
+        latency,
+        "toolSignIn",
+      ),
     toolSignOut: (args) =>
-      wait(() => {
-        profileData(args.profile_id).signingOut.set(args.tool_id, 1);
-        return null;
-      }),
-    toolOpenInstallPage: () => wait(() => null, 100),
+      wait(
+        () => {
+          confirm(findTool(args.tool_id));
+          profileData(args.profile_id).signingOut.set(args.tool_id, 1);
+          return null;
+        },
+        latency,
+        "toolSignOut",
+      ),
+    toolOpenInstallPage: () => wait(() => null, 100, "toolOpenInstallPage"),
     customToolSave: (args) =>
       wait(() => {
         const t = args.tool;
-        if (PRESETS.some((p) => p.id === t.id)) fail("conflict", "This id belongs to a built-in tool");
+        if (PRESETS.some((p) => p.id === t.id)) fail("conflict", "This id belongs to a built-in tool", "id");
+        const exists = custom.some((c) => c.id === t.id);
+        if (exists && !args.replace) fail("conflict", "A custom tool with this id already exists", "id");
+        if (!exists && args.replace) fail("not_found", "This custom tool no longer exists. Close the form and add it again");
         if (t.binary.includes("/"))
           fail(
             "invalid_input",
             "The binary must be a plain program name (letters, digits, '.', '_', '+', '-'), without a path or shell characters",
+            "binary",
           );
         const s = spec({
           id: t.id,
@@ -476,26 +568,27 @@ export function createDevMockClient(): VisionClient {
           logout: t.logout ?? null,
           status: t.status ?? null,
           builtin: false,
+          approved: false,
         });
         const i = custom.findIndex((c) => c.id === s.id);
         if (i >= 0) custom[i] = s;
         else custom.push(s);
         return s;
-      }),
+      }, latency, "customToolSave"),
     customToolDelete: (args) =>
       wait(() => {
         const i = custom.findIndex((c) => c.id === args.tool_id);
         if (i < 0) fail("not_found", "Tool not found");
         custom.splice(i, 1);
         return null;
-      }),
+      }, latency, "customToolDelete"),
     mcpList: (args) => wait(() => profileData(args.profile_id).servers.map((s) => structuredClone(s)), 200),
     mcpSave: (args) =>
       wait(() => {
         const d = profileData(args.profile_id);
         const input: McpServerInput = args.server;
         if (d.servers.some((s) => s.name.toLowerCase() === input.name.toLowerCase() && s.id !== input.id))
-          fail("conflict", "An MCP server with this name already exists in this profile");
+          fail("conflict", "An MCP server with this name already exists in this profile", "name");
         const old = input.id ? d.servers.find((s) => s.id === input.id) : undefined;
         const oldEntries = old
           ? old.transport.kind === "stdio"
@@ -521,20 +614,35 @@ export function createDevMockClient(): VisionClient {
                 },
           tool_ids: input.tool_ids,
           enabled: input.enabled,
+          synced: managed.get(args.profile_id)?.has(input.name) ?? false,
         });
+        view.has_secrets = hasSecret(view);
         d.servers = old ? d.servers.map((s) => (s.id === old.id ? view : s)) : [...d.servers, view];
         return structuredClone(view);
-      }),
+      }, latency, "mcpSave"),
+    mcpSetEnabled: (args) =>
+      wait(
+        () => {
+          const s =
+            profileData(args.profile_id).servers.find((x) => x.id === args.server_id) ??
+            fail("not_found", "MCP server not found");
+          s.enabled = args.enabled;
+          return structuredClone(s);
+        },
+        200,
+        "mcpSetEnabled",
+      ),
     mcpDelete: (args) =>
       wait(() => {
         const d = profileData(args.profile_id);
         d.servers = d.servers.filter((s) => s.id !== args.server_id);
         return null;
-      }),
+      }, latency, "mcpDelete"),
     mcpTest: (args) =>
       wait(() => {
         const d = profileData(args.profile_id);
         const s = d.servers.find((x) => x.id === args.server_id) ?? fail("not_found", "Server not found");
+        if (s.transport.kind === "stdio" && on.has("decline")) fail("not_approved", "You declined to run this command");
         s.health =
           s.transport.kind === "http"
             ? {
@@ -554,17 +662,31 @@ export function createDevMockClient(): VisionClient {
                 checked_at: new Date().toISOString(),
               };
         return structuredClone(s);
-      }, 1500),
+      }, 1500, "mcpTest"),
     mcpSyncClaude: (args) =>
-      wait(() => {
-        const d = profileData(args.profile_id);
-        return {
-          synced: d.servers.filter((s) => s.enabled).map((s) => s.name),
-          removed: d.servers.filter((s) => !s.enabled).map((s) => s.name),
-          failed: [],
-          skipped: [],
-        };
-      }, 1200),
-    mcpAuthorize: () => wait(() => null, 300),
+      wait(
+        () => {
+          const d = profileData(args.profile_id);
+          const names = managed.get(args.profile_id) ?? new Set<string>();
+          managed.set(args.profile_id, names);
+          const enabled = d.servers.filter((s) => s.enabled);
+          const synced = enabled.filter((s) => !s.has_secrets).map((s) => s.name);
+          const skipped = enabled
+            .filter((s) => s.has_secrets)
+            .map((s) => ({
+              name: s.name,
+              reason:
+                "Not synced because it has secret values: Vision never puts a secret on a command line, where other programs on this computer could read it",
+            }));
+          const removed = [...names].filter((n) => !synced.includes(n));
+          for (const n of removed) names.delete(n);
+          for (const n of synced) names.add(n);
+          for (const s of d.servers) s.synced = names.has(s.name);
+          return { synced, removed, failed: [], skipped };
+        },
+        1200,
+        "mcpSyncClaude",
+      ),
+    mcpAuthorize: () => wait(() => null, 300, "mcpAuthorize"),
   };
 }

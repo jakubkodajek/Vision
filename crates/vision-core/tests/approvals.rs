@@ -45,8 +45,11 @@ fn setup() -> Setup {
     );
     let core = h.core();
     let pid = create_profile(&core, "Work").id;
-    core.custom_tool_save(CustomToolSaveArgs { tool: kube() })
-        .unwrap();
+    core.custom_tool_save(CustomToolSaveArgs {
+        tool: kube(),
+        replace: false,
+    })
+    .unwrap();
     Setup { h, core, pid }
 }
 
@@ -125,6 +128,7 @@ fn changed_custom_tool_definition_asks_again() {
                 status: Some(vec!["version".into()]),
                 ..kube()
             },
+            replace: true,
         })
         .unwrap();
     check(&s, "kubectl").unwrap();
@@ -141,6 +145,7 @@ fn renaming_a_custom_tool_does_not_ask_again() {
                 name: "Kubernetes CLI".into(),
                 ..kube()
             },
+            replace: true,
         })
         .unwrap();
     check(&s, "kubectl").unwrap();
@@ -157,7 +162,10 @@ fn deleting_a_custom_tool_forgets_its_approval() {
         })
         .unwrap();
     s.core
-        .custom_tool_save(CustomToolSaveArgs { tool: kube() })
+        .custom_tool_save(CustomToolSaveArgs {
+            tool: kube(),
+            replace: false,
+        })
         .unwrap();
     check(&s, "kubectl").unwrap();
     assert_eq!(s.h.confirmer.count(), 2);
@@ -198,8 +206,11 @@ fn missing_custom_tool_binary_does_not_ask() {
     let h = Harness::new();
     let core = h.core();
     let pid = create_profile(&core, "Work").id;
-    core.custom_tool_save(CustomToolSaveArgs { tool: kube() })
-        .unwrap();
+    core.custom_tool_save(CustomToolSaveArgs {
+        tool: kube(),
+        replace: false,
+    })
+    .unwrap();
     core.tool_check(ToolArgs {
         profile_id: pid,
         tool_id: "kubectl".into(),
@@ -278,6 +289,7 @@ fn confirmation_makes_invisible_characters_in_arguments_visible() {
                 status: Some(vec!["status\u{202e}txt.exe".into()]),
                 ..kube()
             },
+            replace: true,
         })
         .unwrap();
     check(&s, "kubectl").unwrap();
@@ -298,6 +310,7 @@ fn binary_err(binary: &str) -> ErrorCode {
                 binary: binary.into(),
                 ..kube()
             },
+            replace: false,
         })
         .unwrap_err()
         .code
@@ -346,7 +359,7 @@ fn store_legacy_tool(h: &Harness) {
     drop(h.core());
     let conn = rusqlite::Connection::open(h.data_root().join("app.db")).unwrap();
     let spec = serde_json::to_string(&CustomToolInput {
-        config_var: "KUBECONFIG".into(),
+        config_var: "BROWSER".into(),
         ..kube()
     })
     .unwrap();
@@ -609,4 +622,42 @@ fn deleting_a_stdio_server_forgets_its_approval() {
         )
         .unwrap();
     assert_eq!(n, 0);
+}
+
+// ---- A3: the tool view says whether a check would ask --------------------------------------
+
+#[test]
+fn an_approved_custom_tool_view_is_approved() {
+    let s = setup();
+    assert!(check(&s, "kubectl").unwrap().spec.approved);
+}
+
+#[test]
+fn a_custom_tool_listed_before_any_approval_is_not_approved() {
+    let s = setup();
+    let list = s
+        .core
+        .tools_list(vision_core::ipc::ProfileScopeArgs {
+            profile_id: s.pid.clone(),
+        })
+        .unwrap();
+    let kube = list.iter().find(|t| t.spec.id == "kubectl").unwrap();
+    assert!(!kube.spec.approved);
+}
+
+#[test]
+fn a_changed_custom_tool_is_no_longer_approved() {
+    let s = setup();
+    check(&s, "kubectl").unwrap();
+    let v = s
+        .core
+        .custom_tool_save(CustomToolSaveArgs {
+            tool: CustomToolInput {
+                status: Some(vec!["version".into()]),
+                ..kube()
+            },
+            replace: true,
+        })
+        .unwrap();
+    assert!(!v.approved);
 }

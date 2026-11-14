@@ -611,3 +611,40 @@ fn a_failed_update_remove_skips_the_add_and_reports_it() {
         .collect();
     assert_eq!((verbs, report.failed.len()), (vec!["remove".to_owned()], 1));
 }
+
+// ---- A4: sync state and secrets in the server view ------------------------------------------
+
+fn listed(s: &Setup, name: &str) -> vision_core::ipc::McpServerView {
+    s.core
+        .mcp_list(ProfileScopeArgs {
+            profile_id: s.pid.clone(),
+        })
+        .unwrap()
+        .into_iter()
+        .find(|v| v.name == name)
+        .unwrap()
+}
+
+#[test]
+fn a_server_is_not_synced_before_the_first_sync() {
+    let s = setup();
+    save_plain(&s, "files", true, "k-1");
+    assert!(!listed(&s, "files").synced);
+}
+
+#[test]
+fn a_server_is_synced_after_a_sync() {
+    let s = setup();
+    save_plain(&s, "files", true, "k-1");
+    sync(&s);
+    assert!(listed(&s, "files").synced);
+}
+
+#[test]
+fn a_server_with_a_secret_reports_has_secrets_and_stays_unsynced() {
+    let s = setup();
+    save(&s, "secretive", true, "k-1");
+    sync(&s);
+    let v = listed(&s, "secretive");
+    assert_eq!((v.has_secrets, v.synced), (true, false));
+}

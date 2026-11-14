@@ -11,6 +11,7 @@ import type {
   McpSaveArgs,
   McpServerArgs,
   McpServerView,
+  McpSetEnabledArgs,
   Profile,
   ProfileCreateArgs,
   ProfileDeleteArgs,
@@ -28,6 +29,7 @@ import type {
 export interface VisionClient {
   appInfo: () => Promise<AppInfo>;
   bootstrap: () => Promise<Bootstrap>;
+  appOpenReleasesPage: () => Promise<null>;
   profileCreate: (args: ProfileCreateArgs) => Promise<Profile>;
   profileUpdate: (args: ProfileUpdateArgs) => Promise<Profile>;
   profileDelete: (args: ProfileDeleteArgs) => Promise<null>;
@@ -42,6 +44,7 @@ export interface VisionClient {
   customToolDelete: (args: ToolIdArgs) => Promise<null>;
   mcpList: (args: ProfileScopeArgs) => Promise<McpServerView[]>;
   mcpSave: (args: McpSaveArgs) => Promise<McpServerView>;
+  mcpSetEnabled: (args: McpSetEnabledArgs) => Promise<McpServerView>;
   mcpDelete: (args: McpServerArgs) => Promise<null>;
   mcpTest: (args: McpServerArgs) => Promise<McpServerView>;
   mcpSyncClaude: (args: ProfileScopeArgs) => Promise<SyncReport>;
@@ -52,6 +55,7 @@ export interface VisionClient {
 export const tauriClient: VisionClient = {
   appInfo: ipc.appInfo,
   bootstrap: ipc.bootstrap,
+  appOpenReleasesPage: ipc.appOpenReleasesPage,
   profileCreate: ipc.profileCreate,
   profileUpdate: ipc.profileUpdate,
   profileDelete: ipc.profileDelete,
@@ -66,6 +70,7 @@ export const tauriClient: VisionClient = {
   customToolDelete: ipc.customToolDelete,
   mcpList: ipc.mcpList,
   mcpSave: ipc.mcpSave,
+  mcpSetEnabled: ipc.mcpSetEnabled,
   mcpDelete: ipc.mcpDelete,
   mcpTest: ipc.mcpTest,
   mcpSyncClaude: ipc.mcpSyncClaude,

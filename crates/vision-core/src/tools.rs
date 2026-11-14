@@ -130,6 +130,8 @@ impl ToolSpec {
             isolation: self.isolation,
             builtin: self.builtin,
             invalid: self.invalid.clone(),
+            // Custom tools: the core fills this in from the stored approval.
+            approved: self.builtin,
         }
     }
 
@@ -327,6 +329,10 @@ const RESERVED_VAR_PREFIXES: &[&str] = &[
     "SSH_",
 ];
 
+/// Well-known config variables of other programs that do not follow the suffix rule but are
+/// accepted as they are (still subject to the reserved and taken checks).
+const WELL_KNOWN_CONFIG_VARS: &[&str] = &["KUBECONFIG", "DOCKER_CONFIG", "HELM_CONFIG_HOME"];
+
 /// Single variables a custom tool must never redirect.
 const RESERVED_VARS: &[&str] = &["ZDOTDIR", "HOME", "PATH", "PATHEXT", "TMPDIR"];
 
@@ -447,7 +453,8 @@ pub fn validate_argv(label: &str, args: &[String], allow_empty: bool) -> IpcResu
 /// tools' variables), or in a reserved family (`XDG_*`, `GIT_*`, `PYTHON*`, `NODE_*`,
 /// `NPM_*`, `LD_*`, `DYLD_*`, `ANTHROPIC_*`, `CLAUDE_*`, `OPENAI_*`, `CODEX_*`, `GH_*`,
 /// `GITHUB_*`, `AWS_*`, `AZURE_*`, `CLOUDSDK_*`, `GOOGLE_*`, `SSH_*`, `ZDOTDIR`, `HOME`).
-/// Well-known homes of other software such as `JAVA_HOME` are accepted.
+/// Well-known homes of other software such as `JAVA_HOME` are accepted, and so are exactly
+/// `KUBECONFIG`, `DOCKER_CONFIG` and `HELM_CONFIG_HOME`.
 ///
 /// # Errors
 /// `invalid_input` otherwise.
@@ -458,12 +465,13 @@ pub fn validate_config_var(v: &str, taken: &[String]) -> IpcResult<()> {
         && b[0].is_ascii_uppercase()
         && b.iter()
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == b'_')
-        && CONFIG_VAR_SUFFIXES
-            .iter()
-            .any(|s| v.len() > s.len() && v.ends_with(s));
+        && (WELL_KNOWN_CONFIG_VARS.contains(&v)
+            || CONFIG_VAR_SUFFIXES
+                .iter()
+                .any(|s| v.len() > s.len() && v.ends_with(s)));
     if !shape {
         return Err(IpcError::invalid_input(
-            "The config variable must be an upper-case name ending in _CONFIG_DIR, _CONFIG_HOME, _HOME, _CONFIG, _CONFIG_FILE or _DIR, like MYTOOL_CONFIG_DIR",
+            "The config variable must be an upper-case name ending in _CONFIG_DIR, _CONFIG_HOME, _HOME, _CONFIG, _CONFIG_FILE or _DIR, like MYTOOL_CONFIG_DIR (KUBECONFIG is also accepted)",
         ));
     }
     let builtin = builtin_tools()
@@ -489,31 +497,37 @@ pub fn validate_config_var(v: &str, taken: &[String]) -> IpcResult<()> {
 /// Validates a custom tool and turns it into a registry entry. `taken` holds the config
 /// variables of the other custom tools.
 ///
+/// Every error carries the input it belongs to in [`IpcError::field`] (`id`, `name`,
+/// `description`, `binary`, `install_url`, `config_var`, `login`, `status`, `logout`).
+///
 /// # Errors
 /// `invalid_input` for any invalid field, `conflict` when the id is a preset id.
 pub fn custom_tool_spec(input: &CustomToolInput, taken: &[String]) -> IpcResult<ToolSpec> {
-    ids::validate_tool_id(&input.id)?;
+    let on = |field: &'static str| move |e: IpcError| e.with_field(field);
+    ids::validate_tool_id(&input.id).map_err(on("id"))?;
     if builtin_tools().iter().any(|t| t.id == input.id) {
-        return Err(IpcError::conflict("This id belongs to a built-in tool"));
+        return Err(IpcError::conflict("This id belongs to a built-in tool").with_field("id"));
     }
-    let name = text::display_text("The name", &input.name, 40)?;
+    let name = text::display_text("The name", &input.name, 40).map_err(on("name"))?;
     let description = match &input.description {
-        Some(d) if !d.trim().is_empty() => text::display_text("The description", d, 200)?,
+        Some(d) if !d.trim().is_empty() => {
+            text::display_text("The description", d, 200).map_err(on("description"))?
+        }
         _ => String::new(),
     };
-    validate_custom_binary(&input.binary)?;
+    validate_custom_binary(&input.binary).map_err(on("binary"))?;
     if let Some(u) = &input.install_url
         && !u.is_empty()
     {
-        validate_https_url(u)?;
+        validate_https_url(u).map_err(on("install_url"))?;
     }
-    validate_config_var(&input.config_var, taken)?;
-    validate_argv("Sign-in command", &input.login, false)?;
+    validate_config_var(&input.config_var, taken).map_err(on("config_var"))?;
+    validate_argv("Sign-in command", &input.login, false).map_err(on("login"))?;
     if let Some(s) = &input.status {
-        validate_argv("Status command", s, false)?;
+        validate_argv("Status command", s, false).map_err(on("status"))?;
     }
     if let Some(s) = &input.logout {
-        validate_argv("Sign-out command", s, false)?;
+        validate_argv("Sign-out command", s, false).map_err(on("logout"))?;
     }
     Ok(ToolSpec {
         name,

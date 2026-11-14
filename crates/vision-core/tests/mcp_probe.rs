@@ -715,3 +715,80 @@ fn other_commands_stay_responsive_during_a_slow_probe() {
     });
     assert!(listed_in < Duration::from_millis(500), "{listed_in:?}");
 }
+
+// ---- A5: saving or toggling without changing what runs keeps the health -------------------
+
+fn tested_server(h: &Harness) -> (Core, String, McpServerView) {
+    h.install_fake("fake-mcp", json!({ "mcp": {"mode": "ok"} }));
+    let core = h.core();
+    let p = create_profile(&core, "Work");
+    let s = stdio_server(&core, &p.id, "fake-mcp");
+    let v = test(&core, &p.id, &s.id);
+    (core, p.id, v)
+}
+
+fn resave(core: &Core, pid: &str, id: &str, command: &str, enabled: bool) -> McpServerView {
+    core.mcp_save(McpSaveArgs {
+        profile_id: pid.into(),
+        server: McpServerInput {
+            id: Some(id.into()),
+            name: "fake".into(),
+            transport: McpTransportInput::Stdio {
+                command: command.into(),
+                args: vec![],
+                env: vec![],
+            },
+            tool_ids: vec![],
+            enabled,
+        },
+    })
+    .unwrap()
+}
+
+#[test]
+fn saving_with_only_enabled_changed_keeps_the_health() {
+    let h = Harness::new();
+    let (core, pid, v) = tested_server(&h);
+    let saved = resave(&core, &pid, &v.id, "fake-mcp", false);
+    assert_eq!(saved.health, v.health);
+}
+
+#[test]
+fn saving_a_changed_command_resets_the_health() {
+    let h = Harness::new();
+    let (core, pid, v) = tested_server(&h);
+    let saved = resave(&core, &pid, &v.id, "other-mcp", true);
+    assert_eq!(saved.health.status, McpHealthStatus::Untested);
+}
+
+#[test]
+fn set_enabled_changes_only_enabled_and_keeps_the_health() {
+    let h = Harness::new();
+    let (core, pid, v) = tested_server(&h);
+    let toggled = core
+        .mcp_set_enabled(vision_core::ipc::McpSetEnabledArgs {
+            profile_id: pid,
+            server_id: v.id.clone(),
+            enabled: false,
+        })
+        .unwrap();
+    assert_eq!(
+        (toggled.enabled, toggled.health, toggled.transport),
+        (false, v.health, v.transport)
+    );
+}
+
+#[test]
+fn set_enabled_of_an_unknown_server_is_not_found() {
+    let h = Harness::new();
+    let core = h.core();
+    let p = create_profile(&core, "Work");
+    let e = core
+        .mcp_set_enabled(vision_core::ipc::McpSetEnabledArgs {
+            profile_id: p.id,
+            server_id: "m_aaaaaaaaaaaa".into(),
+            enabled: true,
+        })
+        .unwrap_err();
+    assert_eq!(e.code, vision_core::ErrorCode::NotFound);
+}
