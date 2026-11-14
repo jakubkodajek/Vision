@@ -19,3 +19,6 @@ tauri-build = { version = "2.7", features = [] }
 [dependencies]
 tauri = { version = "2.12", features = [] }
 vision-core = { path = "../crates/vision-core" }
+
+[dev-dependencies]
+serde_json.workspace = true

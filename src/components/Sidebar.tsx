@@ -6,9 +6,11 @@ import {
   ListChecks,
   PanelLeftClose,
   PanelLeftOpen,
+  Plug,
   Plus,
   Search,
   Settings,
+  Wrench,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { cx } from "../lib/cx";
@@ -20,6 +22,8 @@ import { Tree } from "./Tree";
 
 const NAV: { id: Section; label: string; icon: ReactNode }[] = [
   { id: "home", label: "Home", icon: <House width={16} height={16} aria-hidden="true" /> },
+  { id: "tools", label: "Tools", icon: <Wrench width={16} height={16} aria-hidden="true" /> },
+  { id: "mcp", label: "MCP servers", icon: <Plug width={16} height={16} aria-hidden="true" /> },
   { id: "projects", label: "Projects", icon: <FolderGit2 width={16} height={16} aria-hidden="true" /> },
   { id: "agents", label: "Agents", icon: <Bot width={16} height={16} aria-hidden="true" /> },
   { id: "tasks", label: "Tasks", icon: <ListChecks width={16} height={16} aria-hidden="true" /> },
@@ -33,15 +37,21 @@ export interface SidebarProps {
   profiles: readonly Profile[];
   activeProfileId: string;
   onSwitchProfile: (id: string) => void;
+  /** Enables "New profile…" in the profile menu. */
+  onNewProfile?: () => void;
+  /** Enables "Manage profiles" in the profile menu. */
+  onManageProfiles?: () => void;
   profileMenuOpen: boolean;
   onProfileMenuOpenChange: (open: boolean) => void;
   section: Section;
   /** Highlighted nav entry only applies when no run is open. */
   activeRunId: string | null;
   onNavigate: (section: Section) => void;
-  onNewTask: () => void;
+  /** Omitted when runs are not available: the New task button is hidden. */
+  onNewTask?: () => void;
   onOpenPalette: () => void;
-  workspace: LoadState<Workspace>;
+  /** Preview projects and runs; `null` hides the project tree and recent runs. */
+  workspace: LoadState<Workspace> | null;
   onRetryWorkspace: () => void;
   expanded: ReadonlySet<string>;
   onToggleNode: (id: string) => void;
@@ -88,26 +98,30 @@ export function Sidebar(props: SidebarProps) {
           profiles={props.profiles}
           activeId={props.activeProfileId}
           onSwitch={props.onSwitchProfile}
+          onNewProfile={props.onNewProfile}
+          onManageProfiles={props.onManageProfiles}
           open={props.profileMenuOpen}
           onOpenChange={props.onProfileMenuOpenChange}
           collapsed={collapsed}
         />
         <div className="sidebar-actions">
-          <button
-            type="button"
-            className="sidebar-new-task"
-            onClick={onNewTask}
-            title={collapsed ? `New task (${shortcutLabel("n")})` : undefined}
-            aria-label={collapsed ? "New task" : undefined}
-          >
-            <Plus width={16} height={16} aria-hidden="true" />
-            {!collapsed && (
-              <>
-                <span>New task</span>
-                <Kbd>{shortcutLabel("n")}</Kbd>
-              </>
-            )}
-          </button>
+          {onNewTask && (
+            <button
+              type="button"
+              className="sidebar-new-task"
+              onClick={onNewTask}
+              title={collapsed ? `New task (${shortcutLabel("n")})` : undefined}
+              aria-label={collapsed ? "New task" : undefined}
+            >
+              <Plus width={16} height={16} aria-hidden="true" />
+              {!collapsed && (
+                <>
+                  <span>New task</span>
+                  <Kbd>{shortcutLabel("n")}</Kbd>
+                </>
+              )}
+            </button>
+          )}
           <button
             type="button"
             className="sidebar-search"
@@ -147,11 +161,12 @@ export function Sidebar(props: SidebarProps) {
           })}
         </ul>
       </div>
-      {!collapsed && (
+      {!collapsed && workspace && (
         <div className="sidebar-scroll">
           <SidebarContent {...props} workspace={workspace} />
         </div>
       )}
+      {!collapsed && !workspace && <div className="sidebar-spacer" />}
       {footer && <div className={cx("sidebar-footer", collapsed && "is-collapsed")}>{footer}</div>}
     </nav>
   );
@@ -165,7 +180,7 @@ function SidebarContent({
   onOpenRun,
   activeRunId,
   onNewTask,
-}: SidebarProps) {
+}: SidebarProps & { workspace: LoadState<Workspace> }) {
   if (workspace.kind === "loading") {
     return (
       <div className="sidebar-section" aria-busy="true" aria-label="Loading projects">
@@ -232,9 +247,11 @@ function SidebarContent({
             compact
             title="No runs yet"
             action={
-              <button type="button" className="link-button" onClick={onNewTask}>
-                Start a task
-              </button>
+              onNewTask && (
+                <button type="button" className="link-button" onClick={onNewTask}>
+                  Start a task
+                </button>
+              )
             }
           />
         ) : (

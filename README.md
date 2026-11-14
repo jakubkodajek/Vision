@@ -1,117 +1,122 @@
-# dev_template
+# Vision
 
-A universal GitHub template for building apps and software with a team of AI agents
-that plan, test, implement, review and verify each other's work. Works with
-**Claude Code** (primary), **OpenAI Codex** and **GitHub Copilot** from one set of
-instructions.
+Vision is an open-source desktop app (macOS, Windows, Linux) for working with AI coding
+agents. It runs the official command-line tools you already use, such as Claude Code and
+Codex, and keeps the sign-ins of each account profile (for example Work and Personal)
+separate. Nothing is hosted, and Vision never stores API keys or tokens.
 
-The design follows published practice from Anthropic, OpenAI and GitHub; see
-[`docs/research.md`](docs/research.md) for the sources.
+## Status
 
-## Quick start
+Early development, before 0.1. Expect missing features, rough edges and breaking changes.
+Installers are built by CI but are not notarised (macOS) or code-signed (Windows).
 
-1. Click **Use this template** → create your new repository, then clone it.
-2. Open it in Claude Code and run `/bootstrap-project`. It interviews you about the
-   product and stack, fills in all placeholders, scaffolds the app and makes `make check` green.
-3. Build features with `/feature <description>`.
-4. Optional: enable AI review on PRs (see [CI](#ci)).
+**In this release** (spec: [`docs/specs/real-app-foundation.md`](docs/specs/real-app-foundation.md)):
 
-## How the agents work together
+- Account profiles that persist across restarts.
+- Per-profile sign-in to Claude Code, Codex, GitHub CLI, Google Cloud CLI, Azure CLI,
+  AWS CLI and custom tools, each with its own config directory, showing who is signed in.
+- Per-profile MCP servers (stdio and HTTP): add, edit, test, remove, and sync them into
+  that profile's Claude Code config.
+- Installers for macOS (`.dmg`), Windows (NSIS `.exe` and `.msi`) and Linux (`.AppImage`
+  and `.deb`).
 
-```mermaid
-flowchart LR
-    P[planner] --> T[test-engineer] --> I[implementer]
-    I --> R{parallel review}
-    R --> CR[code-reviewer] & BH[bug-hunter] & SR[security-reviewer] & UX[ux-ui-reviewer]
-    CR & BH & SR & UX --> V[verifier]
-    V -->|confirmed bugs, max 3 rounds| I
-    V -->|clean| D[docs-keeper] --> PR[PR → human merges]
-```
+**Planned** (see [`docs/PLAN.md`](docs/PLAN.md) §9): agent runs with approvals, git and
+worktrees, nested projects, the agent editor, orchestration, project memory and search.
 
-- Tests are written **before** the code, by a different agent than the implementer.
-- Reviewers work in **fresh contexts** and in **parallel**; each finding needs a
-  concrete failure scenario.
-- The **verifier** re-checks every finding against the code and drops false positives
-  before anything gets fixed.
-- **Hooks** block dangerous commands and edits to secrets; **CI** re-checks everything.
-- **Memory** in `memory/` lets the next session continue where the last one stopped.
+## Download and install
 
-Full protocol: [`docs/agent-workflow.md`](docs/agent-workflow.md).
+Installers are attached to [GitHub Releases](https://github.com/jakubkodajek/Vision/releases)
+together with a `SHA256SUMS` file. Builds of pull requests and `main` are available as
+artifacts of the **Build installers** workflow run (GitHub sign-in required).
 
-## Skills (slash commands)
+Check a download against `SHA256SUMS`:
+`shasum -a 256 -c SHA256SUMS --ignore-missing` (macOS, Linux) or
+`Get-FileHash .\<file>` (Windows PowerShell).
 
-| Command | What it does |
-| --- | --- |
-| `/bootstrap-project` | One-time setup of a new project from this template |
-| `/feature <desc>` | Full pipeline: plan → tests → implement → review → verify → fix → docs |
-| `/review [PR/branch]` | Multi-agent review with false-positive filtering |
-| `/bug-hunt <area>` | Adversarial bug hunt with reproductions and regression tests |
-| `/ux-audit [url]` | Real-browser UX/UI and WCAG 2.2 AA audit with screenshots |
-| `/adr <title>` | Architecture Decision Record |
-| `/handoff` | End-of-session memory update |
+### macOS (12 Monterey or later)
 
-## Repository layout
+Pick `Vision_<version>_aarch64.dmg` for Apple Silicon or `Vision_<version>_x64.dmg` for
+Intel Macs.
 
-```
-AGENTS.md                  canonical instructions for all agents (Codex, Copilot, Claude)
-CLAUDE.md                  imports AGENTS.md + memory, Claude-specific notes
-REVIEW.md                  what reviewers flag, severity scale
-Makefile                   setup / lint / test / e2e / check / dev - the one verification entry point
-.mcp.json                  Playwright MCP for browser-based UX review and e2e
-.claude/
-  agents/                  9 subagents (source of truth)
-  skills/                  7 skills (source of truth)
-  hooks/                   guard-bash, protect-files, post-edit-format
-  rules/                   path-scoped rules (testing, frontend)
-  settings.json            hooks + permissions
-.codex/agents/             generated Codex subagents
-.agents/skills/            generated Codex skills
-.github/
-  agents/                  generated Copilot custom agents
-  copilot-instructions.md  points to AGENTS.md
-  workflows/               ci.yml, claude.yml (@claude), claude-review.yml (PR review)
-  ISSUE_TEMPLATE/, pull_request_template.md
-docs/
-  agent-workflow.md        roles, pipeline, handoff and finding formats
-  research.md              sources behind the design
-  architecture.md, adr/, specs/
-memory/
-  project-context.md       goals, users, constraints (always loaded)
-  lessons-learned.md       rules learned from mistakes (always loaded)
-  decisions.md             decision log
-  progress.md              session handoff log
-  features.json            feature list with pass/fail status
-scripts/sync_agents.py     generates Codex/Copilot copies from .claude/
-.work/                     git-ignored scratch space for agent handoffs
-```
+1. Open the `.dmg` and drag **Vision** onto **Applications**.
+2. Open Vision from Applications. macOS says it cannot verify the app, because Vision is
+   only ad-hoc signed (no Apple Developer ID, not notarised). Click **Done**.
+3. Open **System Settings → Privacy & Security**, scroll to **Security**, and click
+   **Open Anyway** next to the message about Vision. Confirm with **Open Anyway** and your
+   password. You only have to do this once per installed version.
 
-## Editing agents and skills
-
-Edit only `.claude/agents/*.md` and `.claude/skills/*/SKILL.md`, then run:
+Terminal alternative to step 3: remove the quarantine flag, then open the app normally.
 
 ```bash
-python3 scripts/sync_agents.py
+xattr -dr com.apple.quarantine /Applications/Vision.app
 ```
 
-CI fails if the generated copies in `.github/agents/`, `.codex/agents/` and
-`.agents/skills/` are stale.
+### Windows (10 or later)
 
-## CI
+Run `Vision_<version>_x64-setup.exe`. It installs for the current user only, so no
+administrator prompt appears. If Microsoft Defender SmartScreen shows "Windows protected
+your PC", click **More info → Run anyway** (the installer is not code-signed). The installer
+downloads the Microsoft WebView2 runtime if it is missing. The `.msi` is an alternative that
+installs for all users and needs administrator rights.
 
-- **`ci.yml`** - always on: validates agent config, shellchecks and tests the hooks,
-  runs `make check`.
-- **`claude.yml`** - mention `@claude` in an issue or PR comment. Needs the
-  [Claude GitHub App](https://github.com/apps/claude) and an `ANTHROPIC_API_KEY` (or
-  `CLAUDE_CODE_OAUTH_TOKEN`) secret.
-- **`claude-review.yml`** - independent AI review on every PR. Off by default; enable by
-  setting the repository variable `ENABLE_CLAUDE_REVIEW=true` and the secret above.
+### Linux (x86_64)
 
-## Cost note
+- **Debian/Ubuntu:** `sudo apt install ./Vision_<version>_amd64.deb`
+- **Other distributions:** `chmod +x Vision_<version>_amd64.AppImage` and run it. AppImages
+  need FUSE 2 (`libfuse2` on Ubuntu); without it run
+  `./Vision_<version>_amd64.AppImage --appimage-extract-and-run`.
 
-Multi-agent pipelines use many more tokens than a single chat (Anthropic measured about
-15x for their research system). Use `/feature` for real features; for one-line fixes,
-just ask for the fix and run `/review` once.
+Builds target glibc 2.35 (Ubuntu 22.04) or newer.
 
-## License
+## Prerequisites
 
-Choose a license for your project (https://choosealicense.com/) and add a `LICENSE` file.
+Vision does not bundle or install the tools it drives. Install them yourself:
+
+- **git**
+- The CLIs you want to use, from their official pages: Claude Code, Codex, GitHub CLI
+  (`gh`), Google Cloud CLI (`gcloud`), Azure CLI (`az`), AWS CLI (`aws`).
+
+Vision detects which ones are on your `PATH` and links to the official install pages for the
+rest. You sign in through each CLI's own login flow in a terminal window.
+
+## Development
+
+Requirements: Node.js (version in `.nvmrc`), Rust (pinned in `rust-toolchain.toml`,
+installed automatically by `rustup`), and the
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS.
+
+| Task | Command |
+| --- | --- |
+| Install dependencies | `make setup` |
+| Run the app with hot reload | `make dev` |
+| Lint, typecheck and all tests (what CI runs) | `make check` |
+| Build installers for this OS | `make build` |
+| RustSec advisory check (needs `cargo-deny`) | `make audit` |
+| Regenerate icons and DMG background (needs Pillow, after `npm ci`) | `make icons` |
+
+`make build` writes installers to `target/release/bundle/` (or
+`target/<target-triple>/release/bundle/` with
+`make build TAURI_BUILD_ARGS="--target <target-triple>"`).
+
+Layout: `src/` React UI, `src-tauri/` Tauri shell, `crates/vision-core/` domain logic,
+`tests/` UI and config tests, `docs/` plan, specs and ADRs. Contributor and AI-agent rules
+are in [`AGENTS.md`](AGENTS.md) and [`docs/agent-workflow.md`](docs/agent-workflow.md).
+
+### CI
+
+- `ci.yml`: agent configuration checks, `make check`, RustSec advisories (`cargo deny`).
+- `build.yml`: `make check`, then installers for macOS Apple Silicon and Intel, Windows and
+  Linux, uploaded as artifacts. A `v*` tag also creates a draft GitHub Release with the
+  installers and `SHA256SUMS`.
+- All third-party actions are pinned to commit SHAs; no repository secrets are used.
+
+The macOS DMG window layout (background, icon positions) is written by Finder through
+AppleScript while the DMG is built. Tauri skips that step when `CI=true`
+([tauri-apps/tauri#1731](https://github.com/tauri-apps/tauri/issues/1731)); `build.yml`
+sets `TAURI_BUNDLER_DMG_IGNORE_CI=true` because GitHub's macOS runners allow `osascript` to
+control Finder, and then checks the stored layout in the mounted DMG. If Finder ever refuses,
+the macOS build fails rather than producing a DMG without the layout.
+
+## Licence
+
+MIT, see [`LICENSE`](LICENSE).

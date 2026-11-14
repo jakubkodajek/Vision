@@ -1,0 +1,11 @@
+# cargo-deny configuration: RustSec advisory check (CI job "Dependency advisories").
+# Run locally with `make audit` (needs cargo-deny: `cargo install cargo-deny --locked`).
+[advisories]
+version = 2
+# Vulnerabilities always fail. "Unmaintained" notices fail only for crates this
+# workspace depends on directly; transitive ones from Tauri's GTK/zbus stack are
+# reported upstream and cannot be replaced here.
+unmaintained = "workspace"
+yanked = "deny"
+# Every ignore needs an advisory id and a reason.
+ignore = []

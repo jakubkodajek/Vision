@@ -1,5 +1,5 @@
 import { LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
 import { cx } from "../lib/cx";
 import type { RunStatus } from "../types";
 
@@ -11,6 +11,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   /** Shows a spinner, sets aria-busy and blocks clicks. */
   loading?: boolean;
   icon?: ReactNode;
+  ref?: Ref<HTMLButtonElement>;
 }
 
 /** Text button with variants and a loading state. */

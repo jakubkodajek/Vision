@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-mcp-authorize"
+description = "Enables the mcp_authorize command without any pre-configured scope."
+commands.allow = ["mcp_authorize"]
+
+[[permission]]
+identifier = "deny-mcp-authorize"
+description = "Denies the mcp_authorize command without any pre-configured scope."
+commands.deny = ["mcp_authorize"]

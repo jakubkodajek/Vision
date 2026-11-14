@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadDemoWorkspace } from "../../src/demo/workspace";
+import { DEMO_PROFILES, loadDemoWorkspace } from "../../src/demo/workspace";
 import { AppShell } from "../../src/shell/AppShell";
 import type { Workspace } from "../../src/types";
 import { seriousViolations } from "./helpers";
@@ -11,6 +11,7 @@ function renderShell(loadWorkspace: (id: string) => Promise<Workspace> = instant
   return render(
     <AppShell
       loadWorkspace={loadWorkspace}
+      profiles={DEMO_PROFILES}
       coreVersion="0.1.0"
       footer={<span>Core 0.1.0</span>}
       streamDelayMs={0}

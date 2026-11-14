@@ -125,11 +125,36 @@ describe("capabilities", () => {
     expect(files().length).toBeGreaterThan(0);
   });
 
-  it("every capability grants only allow-app-info to the main window, no remote", () => {
+  // Exactly the IPC commands of docs/specs/real-app-foundation.md §2.6, nothing else
+  // (no core:/plugin permissions, no generic run-command or file access).
+  const specCommands = [
+    "app_info",
+    "bootstrap",
+    "profile_create",
+    "profile_update",
+    "profile_delete",
+    "profile_set_active",
+    "profile_open_terminal",
+    "tools_list",
+    "tool_check",
+    "tool_sign_in",
+    "tool_sign_out",
+    "tool_open_install_page",
+    "custom_tool_save",
+    "custom_tool_delete",
+    "mcp_list",
+    "mcp_save",
+    "mcp_delete",
+    "mcp_test",
+    "mcp_sync_claude",
+    "mcp_authorize",
+  ];
+
+  it("every capability grants exactly the spec 2.6 commands to the main window, no remote", () => {
     for (const f of files()) {
       const cap = readJson<Capability>(join(dir, f));
       expect(cap.windows).toEqual(["main"]);
-      expect(cap.permissions).toEqual(["allow-app-info"]);
+      expect(cap.permissions).toEqual(specCommands.map((c) => `allow-${c.replaceAll("_", "-")}`));
       expect(cap).not.toHaveProperty("remote");
     }
   });

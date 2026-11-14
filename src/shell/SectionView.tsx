@@ -4,7 +4,7 @@ import { EmptyState } from "../components/primitives";
 import type { Section } from "../types";
 
 const SECTIONS: Record<
-  Exclude<Section, "home" | "settings">,
+  Exclude<Section, "home" | "settings" | "tools" | "mcp">,
   { title: string; icon: ReactNode; description: string }
 > = {
   projects: {
@@ -33,7 +33,10 @@ const SECTIONS: Record<
 };
 
 /** Placeholder for a section whose feature is not built yet. */
-export function SectionView({ section }: { section: Exclude<Section, "home" | "settings"> }) {
+/** Sections that have their own view instead of a placeholder. */
+type RealSection = "home" | "settings" | "tools" | "mcp";
+
+export function SectionView({ section }: { section: Exclude<Section, RealSection> }) {
   const info = SECTIONS[section];
   return (
     <div className="section-view">

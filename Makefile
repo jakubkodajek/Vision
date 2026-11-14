@@ -1,11 +1,11 @@
 # Single entry point for humans, agents and CI.
-.PHONY: setup lint test e2e check dev agents placeholders
+.PHONY: setup lint test e2e check dev build audit icons agents placeholders bindings bindings-check
 
 setup: ## Install dependencies (npm + cargo)
 	npm ci
 	cargo fetch --locked
 
-lint: ## Format check, clippy, typecheck, eslint
+lint: bindings-check ## Format check, clippy, typecheck, eslint, stale IPC bindings
 	cargo fmt --all -- --check
 	cargo clippy --workspace --all-targets --locked -- -D warnings
 	npx tsc --noEmit
@@ -22,6 +22,33 @@ check: agents placeholders lint test ## Everything CI runs
 
 dev: ## Run the desktop app with hot reload
 	npx tauri dev
+
+# Extra arguments for `tauri build`, e.g. TAURI_BUILD_ARGS="--target aarch64-apple-darwin".
+TAURI_BUILD_ARGS ?=
+
+build: ## Build release installers for this OS (output in target/**/release/bundle/)
+ifeq ($(shell uname -s),Darwin)
+	mkdir -p target/dmg
+	tiffutil -cathidpicheck src-tauri/icons/dmg/background.png src-tauri/icons/dmg/background@2x.png -out target/dmg/background.tiff
+	npx tauri build --config '{"bundle":{"macOS":{"dmg":{"background":"../target/dmg/background.tiff"}}}}' $(TAURI_BUILD_ARGS)
+else
+	npx tauri build $(TAURI_BUILD_ARGS)
+endif
+
+audit: ## RustSec advisory check (needs cargo-deny)
+	cargo deny --locked check advisories
+
+icons: ## Regenerate app icons and the DMG background from src-tauri/icons/source/vision-mark.svg
+	python3 scripts/make_icons.py
+
+bindings: ## Regenerate src/ipc/bindings.ts from the Rust IPC types
+	cargo run --quiet --locked -p vision-core --example gen_bindings -- src/ipc/bindings.ts
+
+# Generates into the git-ignored target/ directory (never under src/) and diffs.
+bindings-check: ## Fail if src/ipc/bindings.ts is stale
+	@mkdir -p target/bindings-check
+	@cargo run --quiet --locked -p vision-core --example gen_bindings -- target/bindings-check/bindings.ts
+	@diff -u src/ipc/bindings.ts target/bindings-check/bindings.ts || { echo "src/ipc/bindings.ts is stale: run 'make bindings' and commit the result"; exit 1; }
 
 agents: ## Verify generated agent files are in sync
 	@python3 scripts/sync_agents.py --check
