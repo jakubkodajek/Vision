@@ -58,3 +58,9 @@ Template:
 - Implementation note: the orchestrator wrote code and tests itself instead of delegating to planner/test-engineer/implementer; reviews were by fresh agents.
 - Next: F-002 (installer matrix) or F-003 (storage). Run `make dev` on macOS to try the UI.
 - Deferred: UX-7 (fade under sticky header/composer), UX-8 (collapsed rail status dot tooltip), UX-9 (disabled states rely partly on muted colour); real loading/error states get exercised once the core provides data.
+
+## 2026-11-14 - real-app (Rust core + IPC)
+- Done: `vision-core` modules paths, db (WAL, `user_version` migrations, backup via `VACUUM INTO`, refuses newer schema read-only), profiles, env (allowlist builder, login-shell PATH), process (timeout, group kill), tools (presets, parsers with fixtures, custom tools), terminal (launch scripts, `sh_quote`/`cmd_quote`), secrets (keyring + in-memory), mcp (CRUD validation, minimal probe, Claude config render, sync), ipc types, `Core` facade. `src-tauri`: 20 async commands via `spawn_blocking`, startup error kept in state, capability lists exactly the spec commands. `src/ipc/bindings.ts` (generated) and `src/ipc/client.ts`.
+- Tests: fake CLI / fake MCP server binary `crates/vision-core/tests/bin/fake.rs`; AC1-AC11 covered by `crates/vision-core/tests/*.rs`, `src-tauri/src/lib.rs` tests, `tests/ipc/client.test.ts`, `tests/config/tauri-config.test.ts`.
+- Not verified live: real CLI output formats (codex, gh text, aws) beyond the documented shapes; Windows/macOS builds (only Linux here); real terminal launch and keychain.
+- Next: UI agent builds on `src/ipc/client.ts` (spec §3).
