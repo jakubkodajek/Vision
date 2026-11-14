@@ -117,9 +117,23 @@
   flex: none;
 }
 
+/* Current page: accent-soft fill plus an accent bar, unlike the neutral hover. */
 .nav-item.is-current {
-  background: var(--color-active);
-  font-weight: var(--font-weight-medium);
+  position: relative;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: var(--font-weight-semibold);
+}
+
+.nav-item.is-current::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: var(--radius-full);
+  background: var(--focus-ring);
 }
 
 .nav-item.is-current svg {
