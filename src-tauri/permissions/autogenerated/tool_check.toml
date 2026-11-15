@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tool-check"
+description = "Enables the tool_check command without any pre-configured scope."
+commands.allow = ["tool_check"]
+
+[[permission]]
+identifier = "deny-tool-check"
+description = "Denies the tool_check command without any pre-configured scope."
+commands.deny = ["tool_check"]

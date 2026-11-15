@@ -1,0 +1,5 @@
+# Files that tests compare byte for byte against generated or expected output must keep
+# LF line endings on every platform (Git for Windows converts text to CRLF by default).
+src/ipc/bindings.ts text eol=lf
+crates/vision-core/tests/fixtures/** text eol=lf
+crates/vision-core/tests/golden/** text eol=lf

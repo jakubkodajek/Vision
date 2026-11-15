@@ -132,3 +132,67 @@ describe("design token contrast (WCAG 2.2 AA, 4.5:1)", () => {
     }
   }
 });
+
+/*
+ * Non-text contrast (WCAG 2.2 SC 1.4.11, 3:1) for control outlines and focus indicators,
+ * and placeholder text (4.5:1, drawn without opacity).
+ */
+const MIN_UI_CONTRAST = 3;
+const allSurfaces = [...surfaces, "--accent-soft"];
+
+const uiPairs: [fg: string, bg: string][] = [
+  // UX-6 input borders and UX-7 the switch track when off use --color-input-border.
+  ...surfaces.map((bg): [string, string] => ["--color-input-border", bg]),
+  // UX-8 the focus ring on every surface, including a selected (accent-soft) option.
+  ...allSurfaces.map((bg): [string, string] => ["--focus-ring", bg]),
+  // UX-9 the selected segmented option's outline against the group background.
+  ["--focus-ring", "--color-surface-sunken"],
+];
+
+const placeholderPairs: [fg: string, bg: string][] = [
+  ["--color-placeholder", "--color-surface"],
+  ["--color-placeholder", "--color-surface-sunken"],
+  ["--color-placeholder", "--color-bg"],
+];
+
+describe("control and focus contrast (WCAG 2.2 AA, 3:1)", () => {
+  for (const accent of ACCENTS) {
+    const light = themeWithAccent(lightBase, topLevelBlock(`[data-accent="${accent}"]`));
+    const dark = themeWithAccent(
+      new Map([...darkForced, ...topLevelBlock(`[data-accent="${accent}"]`)]),
+      block(`:root[data-theme="dark"] [data-accent="${accent}"]`),
+    );
+    for (const [name, theme] of [
+      ["light", light],
+      ["dark", dark],
+    ] as const) {
+      it.each(uiPairs)(`${name}/${accent}: %s on %s`, (fg, bg) => {
+        const ratio = contrast(get(theme, fg), get(theme, bg));
+        expect(ratio, `${fg} on ${bg} = ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(MIN_UI_CONTRAST);
+      });
+      it.each(placeholderPairs)(`${name}/${accent}: %s on %s`, (fg, bg) => {
+        const ratio = contrast(get(theme, fg), get(theme, bg));
+        expect(ratio, `${fg} on ${bg} = ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(MIN_TEXT_CONTRAST);
+      });
+    }
+  }
+
+  it("draws_placeholders_without_opacity", () => {
+    const sheets = ["views.css", "components.css"].map((f) =>
+      readFileSync(resolve(__dirname, `../../src/styles/${f}`), "utf8"),
+    );
+    for (const sheet of sheets) {
+      for (const rule of sheet.matchAll(/::placeholder\s*\{([^}]*)\}/g)) {
+        expect(rule[1]).toMatch(/color:\s*var\(--color-placeholder\)/);
+        expect(rule[1]).not.toMatch(/opacity:\s*0/);
+      }
+    }
+  });
+
+  it("draws_every_focus_outline_with_the_focus_ring_token", () => {
+    for (const f of ["base.css", "layout.css", "views.css", "components.css"]) {
+      const sheet = readFileSync(resolve(__dirname, `../../src/styles/${f}`), "utf8");
+      expect(sheet, f).not.toMatch(/outline:\s*var\(--focus-ring-width\)\s+solid\s+var\(--accent\)/);
+    }
+  });
+});

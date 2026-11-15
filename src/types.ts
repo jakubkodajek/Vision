@@ -11,7 +11,7 @@ export const ACCENT_NAMES: readonly AccentName[] = ["iris", "teal", "amber", "ro
 export interface Profile {
   id: string;
   name: string;
-  /** Short label of the signed-in identity, e.g. a GitHub login. Never a secret. */
+  /** Second line under the name, e.g. the profile kind or a signed-in login. Never a secret. */
   account: string;
   accent: AccentName;
 }
@@ -98,6 +98,6 @@ export interface Workspace {
 export type LoadState<T> =
   { kind: "loading" } | { kind: "ready"; data: T } | { kind: "error"; message: string };
 
-export type Section = "home" | "projects" | "agents" | "tasks" | "knowledge" | "settings";
+export type Section = "home" | "tools" | "mcp" | "projects" | "agents" | "tasks" | "knowledge" | "settings";
 
 export type ThemePreference = "system" | "light" | "dark";

@@ -13,11 +13,27 @@ export function splitFences(text: string): TextSegment[] {
   for (const match of text.matchAll(fence)) {
     const start = match.index;
     if (start > last) segments.push({ kind: "text", text: text.slice(last, start) });
-    segments.push({ kind: "code", lang: match[1] ?? "", text: (match[2] ?? "").replace(/\n$/, "") });
+    segments.push({
+      kind: "code",
+      lang: match[1] ?? "",
+      text: (match[2] ?? "").replace(/\n$/, ""),
+    });
     last = start + match[0].length;
   }
   if (last < text.length) segments.push({ kind: "text", text: text.slice(last) });
   return segments
     .map((s) => (s.kind === "text" ? { ...s, text: s.text.replace(/^\n+|\n+$/g, "") } : s))
     .filter((s) => s.kind === "code" || s.text.length > 0);
+}
+
+/**
+ * Splits text entered one item per line. Only a trailing carriage return is removed: spaces
+ * at the start or end of a line are part of the item (an argument can need them), and only
+ * lines that are completely empty are dropped.
+ */
+export function linesToList(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.replace(/\r$/, ""))
+    .filter((line) => line.length > 0);
 }

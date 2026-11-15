@@ -1,0 +1,4 @@
+github.com
+  ✓ Logged in to github.com account octocat (/profile/tools/gh/hosts.yml)
+  - Active account: true
+  - Git operations protocol: https

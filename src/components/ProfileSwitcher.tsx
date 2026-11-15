@@ -1,5 +1,14 @@
-import { Check, ChevronsUpDown, Settings2 } from "lucide-react";
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { Check, ChevronsUpDown, Plus, Settings2 } from "lucide-react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { cx } from "../lib/cx";
 import type { Profile } from "../types";
 
@@ -7,18 +16,24 @@ export interface ProfileSwitcherProps {
   profiles: readonly Profile[];
   activeId: string;
   onSwitch: (id: string) => void;
+  /** Shows an enabled "New profile…" entry. */
+  onNewProfile?: () => void;
+  /** Enables the "Manage profiles" entry; without it the entry is shown disabled. */
+  onManageProfiles?: () => void;
   /** Controlled open state, so the command palette can open the menu too. */
   open: boolean;
   onOpenChange: (open: boolean) => void;
   collapsed?: boolean;
 }
 
+/** Up to two initials from the first letter or digit of each word ("(Old) side" is "OS"). */
 function initials(name: string): string {
   return name
     .split(/\s+/)
-    .filter(Boolean)
+    .map((word) => /[\p{L}\p{N}]/u.exec(word)?.[0])
+    .filter((ch): ch is string => ch !== undefined)
     .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
+    .map((ch) => ch.toUpperCase())
     .join("");
 }
 
@@ -33,13 +48,15 @@ export function ProfileAvatar({ profile, size = "md" }: { profile: Profile; size
 
 /**
  * Profile switcher at the top of the sidebar (menu button pattern,
- * https://www.w3.org/WAI/ARIA/apg/patterns/menu-button/). Creating and editing
- * profiles arrives with F-010; the entry is shown disabled until then.
+ * https://www.w3.org/WAI/ARIA/apg/patterns/menu-button/). "New profile…" and "Manage
+ * profiles" are enabled when their handlers are given.
  */
 export function ProfileSwitcher({
   profiles,
   activeId,
   onSwitch,
+  onNewProfile,
+  onManageProfiles,
   open,
   onOpenChange,
   collapsed = false,
@@ -73,7 +90,7 @@ export function ProfileSwitcher({
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         aria-label={collapsed ? `${active.name} profile, switch profile` : undefined}
-        title={collapsed ? `Profile: ${active.name}` : undefined}
+        title={collapsed ? `Profile: ${active.name}` : active.name}
         onClick={() => {
           setInitialFocus("current");
           onOpenChange(!open);
@@ -99,15 +116,45 @@ export function ProfileSwitcher({
           activeId={active.id}
           initialFocus={initialFocus}
           buttonRef={buttonRef}
+          collapsed={collapsed}
           onSelect={(id) => {
             onSwitch(id);
             close(true);
           }}
+          actions={menuActions(onNewProfile, onManageProfiles)}
           onClose={close}
         />
       )}
     </div>
   );
+}
+
+interface MenuAction {
+  id: string;
+  label: string;
+  hint?: string;
+  icon: ReactNode;
+  /** Omitted for a disabled entry. */
+  run?: () => void;
+}
+
+function menuActions(onNewProfile?: () => void, onManageProfiles?: () => void): MenuAction[] {
+  const manageIcon = <Settings2 width={14} height={14} aria-hidden="true" />;
+  const actions: MenuAction[] = [];
+  if (onNewProfile) {
+    actions.push({
+      id: "new",
+      label: "New profile…",
+      icon: <Plus width={14} height={14} aria-hidden="true" />,
+      run: onNewProfile,
+    });
+  }
+  actions.push(
+    onManageProfiles
+      ? { id: "manage", label: "Manage profiles", icon: manageIcon, run: onManageProfiles }
+      : { id: "manage", label: "Manage profiles…", hint: "Coming with profile management", icon: manageIcon },
+  );
+  return actions;
 }
 
 function ProfileMenu({
@@ -116,7 +163,9 @@ function ProfileMenu({
   activeId,
   initialFocus,
   buttonRef,
+  collapsed,
   onSelect,
+  actions,
   onClose,
 }: {
   id: string;
@@ -124,10 +173,13 @@ function ProfileMenu({
   activeId: string;
   initialFocus: "current" | "last";
   buttonRef: RefObject<HTMLButtonElement | null>;
+  /** In the collapsed rail the menu opens beside it, outside the rail's clipping. */
+  collapsed: boolean;
   onSelect: (id: string) => void;
+  actions: readonly MenuAction[];
   onClose: (restoreFocus: boolean) => void;
 }) {
-  const itemCount = profiles.length + 1;
+  const itemCount = profiles.length + actions.length;
   const [focusIndex, setFocusIndex] = useState(() =>
     initialFocus === "last"
       ? itemCount - 1
@@ -142,6 +194,28 @@ function ProfileMenu({
   useEffect(() => {
     itemRefs.current[focusIndex]?.focus();
   }, [focusIndex]);
+
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    const button = buttonRef.current;
+    if (!collapsed || !menu || !button) return;
+    const rect = button.getBoundingClientRect();
+    menu.style.setProperty("--menu-top", `${String(rect.top)}px`);
+    menu.style.setProperty("--menu-left", `${String(rect.right + 8)}px`);
+  }, [buttonRef, collapsed]);
+
+  const labels = [...profiles.map((p) => p.name), ...actions.map((a) => a.label)];
+  /** First-letter typeahead: the next item whose label starts with `char`. */
+  const typeahead = (char: string) => {
+    const needle = char.toLocaleLowerCase();
+    for (let step = 1; step <= itemCount; step += 1) {
+      const index = (focusIndex + step) % itemCount;
+      if (labels[index]?.trim().toLocaleLowerCase().startsWith(needle)) {
+        setFocusIndex(index);
+        return;
+      }
+    }
+  };
 
   useEffect(() => {
     const onPointer = (event: PointerEvent) => {
@@ -180,6 +254,11 @@ function ProfileMenu({
       case "Tab":
         onClose(false);
         break;
+      default:
+        if (event.key.length === 1 && event.key !== " " && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          event.preventDefault();
+          typeahead(event.key);
+        }
     }
   };
 
@@ -216,7 +295,9 @@ function ProfileMenu({
           >
             <ProfileAvatar profile={profile} size="sm" />
             <span className="menu-item-text">
-              <span>{profile.name}</span>
+              <span className="menu-item-label" title={profile.name}>
+                {profile.name}
+              </span>
               <span className="menu-item-hint">{profile.account}</span>
             </span>
             {checked && <Check className="menu-item-check" width={14} height={14} aria-hidden="true" />}
@@ -224,21 +305,41 @@ function ProfileMenu({
         );
       })}
       <div role="separator" className="menu-separator" />
-      <div
-        ref={(el) => {
-          itemRefs.current[profiles.length] = el;
-        }}
-        role="menuitem"
-        aria-disabled="true"
-        tabIndex={focusIndex === profiles.length ? 0 : -1}
-        className="menu-item is-disabled"
-      >
-        <Settings2 width={14} height={14} aria-hidden="true" />
-        <span className="menu-item-text">
-          <span>Manage profiles…</span>
-          <span className="menu-item-hint">Coming with profile management</span>
-        </span>
-      </div>
+      {actions.map((action, offset) => {
+        const index = profiles.length + offset;
+        const activate = action.run
+          ? () => {
+              // Focus goes back to the menu button, so a dialog the action opens returns it there.
+              onClose(true);
+              action.run?.();
+            }
+          : undefined;
+        return (
+          <div
+            key={action.id}
+            ref={(el) => {
+              itemRefs.current[index] = el;
+            }}
+            role="menuitem"
+            aria-disabled={activate ? undefined : "true"}
+            tabIndex={focusIndex === index ? 0 : -1}
+            className={cx("menu-item", !activate && "is-disabled")}
+            onClick={activate}
+            onKeyDown={(event) => {
+              if (activate && (event.key === "Enter" || event.key === " ")) {
+                event.preventDefault();
+                activate();
+              }
+            }}
+          >
+            {action.icon}
+            <span className="menu-item-text">
+              <span>{action.label}</span>
+              {action.hint && <span className="menu-item-hint">{action.hint}</span>}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

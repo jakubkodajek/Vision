@@ -58,3 +58,26 @@ Template:
 - Implementation note: the orchestrator wrote code and tests itself instead of delegating to planner/test-engineer/implementer; reviews were by fresh agents.
 - Next: F-002 (installer matrix) or F-003 (storage). Run `make dev` on macOS to try the UI.
 - Deferred: UX-7 (fade under sticky header/composer), UX-8 (collapsed rail status dot tooltip), UX-9 (disabled states rely partly on muted colour); real loading/error states get exercised once the core provides data.
+
+## 2026-11-14 - real-app (Rust core + IPC)
+- Done: `vision-core` modules paths, db (WAL, `user_version` migrations, backup via `VACUUM INTO`, refuses newer schema read-only), profiles, env (allowlist builder, login-shell PATH), process (timeout, group kill), tools (presets, parsers with fixtures, custom tools), terminal (launch scripts, `sh_quote`/`cmd_quote`), secrets (keyring + in-memory), mcp (CRUD validation, minimal probe, Claude config render, sync), ipc types, `Core` facade. `src-tauri`: 20 async commands via `spawn_blocking`, startup error kept in state, capability lists exactly the spec commands. `src/ipc/bindings.ts` (generated) and `src/ipc/client.ts`.
+- Tests: fake CLI / fake MCP server binary `crates/vision-core/tests/bin/fake.rs`; AC1-AC11 covered by `crates/vision-core/tests/*.rs`, `src-tauri/src/lib.rs` tests, `tests/ipc/client.test.ts`, `tests/config/tauri-config.test.ts`.
+- Not verified live: real CLI output formats (codex, gh text, aws) beyond the documented shapes; Windows/macOS builds (only Linux here); real terminal launch and keychain.
+- Next: UI agent builds on `src/ipc/client.ts` (spec §3).
+
+## 2026-11-14 - real-app review fixes (Rust core)
+- Done: SEC-1..9, BUG-1..14 and the suspected items from the security review and bug hunt (`.work/real-app/security/`, `.work/real-app/bughunt/`): native confirmation of custom tools and stdio MCP servers (`approvals.rs`, `ErrorCode::NotApproved`), sync skips servers with secrets and never removes unmanaged names, secrets re-entered when the destination changes, config variable allowlist, `cmd.exe /d /k` terminal launch, per-profile gate and revision-checked health writes, secret index in app.db, startup orphan cleanup, runner with shared buffer and 250 ms pipe grace, probe robustness, Unicode name hygiene, single instance.
+- Tests: new `tests/approvals.rs`, `tests/config_vars.rs`, `tests/process_runner.rs`; regression tests appended to the existing suites; repro behaviours ported into the Rust fake (no Python).
+- Not verified live: Windows terminal launch (new console with inherited handles), the dialog's default button (the plugin does not expose it), macOS and Windows test runs (CI step added).
+- Next: UI agent shows `not_approved`, `SyncReport.skipped` and `ToolSpecView.invalid`.
+
+## 2026-11-14 - real-app UI review fixes
+- Done: core A1-A7 (IpcError field/entry_key, ToolSpecView.approved, McpServerView synced/has_secrets, `mcp_set_enabled`, `app_open_releases_page`, more config vars, health kept on unchanged destination), UI CR-1..CR-16 and UX-1..UX-38 (approval-aware checks, per-key sequence guards, accessible dialog stack, field-level errors, live region per scope, 3:1 control borders and focus ring, copy).
+- Evidence: vitest and Rust suites in `make check` (`.work/real-app/check-uifix.log`); axe with color-contrast 0 violations in 12 states x light/dark x 1280x820/880x560; focus/live-region script 23 PASS (`.work/real-app/uxfix/`); screenshots retaken in `docs/screenshots/real-app/`.
+- Partial/deferred: UX-11 (values wrap, no Copy button); NewProfileDialog has no unsaved-changes prompt; stored-secret screenshot shows the secret row below the fold.
+
+## 2026-11-15 - real-app CI on all platforms
+- Done: first native `cargo test` runs on Windows and macOS. Fixed a Windows hang in `GroupChild::kill_group` (Job Object wait after a drained completion port) and CRLF checkout of byte-compared files (`.gitattributes`). PR #4 body filled in with evidence.
+- State: `make check` exit 0 locally (417 Rust tests, 921 vitest tests); all PR #4 jobs green on 96c81a5 (macOS arm64 and x86_64, Windows, Linux, advisories).
+- Not verified live: the app inside a real Tauri window on macOS or Windows (terminal launch, keychain, confirmation dialog). `passes` in `memory/features.json` is unchanged until that is done.
+- Next: owner installs the `.dmg` from the PR #4 workflow artifacts and tries sign-in per profile; then a second independent review of the UI fix round; then F-006/F-020 (agent runs).

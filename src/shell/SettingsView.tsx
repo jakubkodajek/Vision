@@ -1,4 +1,4 @@
-import { Monitor, Moon, Sun } from "lucide-react";
+import { Check, Monitor, Moon, Sun } from "lucide-react";
 import type { ReactNode } from "react";
 import { cx } from "../lib/cx";
 import type { ThemePreference } from "../types";
@@ -10,27 +10,34 @@ const THEMES: { id: ThemePreference; label: string; icon: ReactNode }[] = [
 ];
 
 export interface SettingsViewProps {
+  /** Sections shown before Appearance, e.g. profile management. */
+  top?: ReactNode;
   theme: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
   coreVersion: string | null;
 }
 
-/** App settings. Only appearance exists for now; profiles and tools follow in M1. */
-export function SettingsView({ theme, onThemeChange, coreVersion }: SettingsViewProps) {
+/** App settings: optional sections from the app (profiles), appearance and about. */
+export function SettingsView({ top, theme, onThemeChange, coreVersion }: SettingsViewProps) {
   return (
     <div className="section-view">
       <header className="view-header">
         <div className="view-header-main">
-          <h2 className="view-title">Settings</h2>
+          <h2 className="view-title" tabIndex={-1} data-focus-fallback>
+            Settings
+          </h2>
+          <p className="view-subtitle">Profiles, appearance and version</p>
         </div>
       </header>
-      <div className="settings-body">
+      <div className="page-scroll">
+        <div className="page-inner">
+        {top}
         <section className="settings-group" aria-labelledby="settings-appearance">
           <h3 id="settings-appearance" className="section-heading">
             Appearance
           </h3>
           <fieldset className="segmented">
-            <legend className="settings-label">Theme</legend>
+            <legend className="field-label">Theme</legend>
             <div className="segmented-options">
               {THEMES.map((option) => (
                 <label
@@ -46,7 +53,7 @@ export function SettingsView({ theme, onThemeChange, coreVersion }: SettingsView
                       onThemeChange(option.id);
                     }}
                   />
-                  {option.icon}
+                  {theme === option.id ? <Check width={16} height={16} aria-hidden="true" /> : option.icon}
                   <span>{option.label}</span>
                 </label>
               ))}
@@ -60,15 +67,16 @@ export function SettingsView({ theme, onThemeChange, coreVersion }: SettingsView
           </h3>
           <dl className="settings-list">
             <div>
-              <dt>Core version</dt>
-              <dd>{coreVersion ?? "Not connected"}</dd>
+              <dt>Version</dt>
+              <dd>{coreVersion ?? "Not available"}</dd>
             </div>
             <div>
-              <dt>Licence</dt>
+              <dt>License</dt>
               <dd>MIT</dd>
             </div>
           </dl>
         </section>
+        </div>
       </div>
     </div>
   );

@@ -18,4 +18,13 @@ tauri-build = { version = "2.7", features = [] }
 
 [dependencies]
 tauri = { version = "2.12", features = [] }
+# Native OK/Cancel dialog to confirm user-defined commands before they run (SEC-1). Official
+# Tauri plugin; used only from Rust, no dialog permission is granted to the webview.
+tauri-plugin-dialog = "2.8"
+# One running instance per user, so two processes never share (and race on) the data root.
+# Official Tauri plugin.
+tauri-plugin-single-instance = "2.5"
 vision-core = { path = "../crates/vision-core" }
+
+[dev-dependencies]
+serde_json.workspace = true

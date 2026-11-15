@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tool-sign-in"
+description = "Enables the tool_sign_in command without any pre-configured scope."
+commands.allow = ["tool_sign_in"]
+
+[[permission]]
+identifier = "deny-tool-sign-in"
+description = "Denies the tool_sign_in command without any pre-configured scope."
+commands.deny = ["tool_sign_in"]
