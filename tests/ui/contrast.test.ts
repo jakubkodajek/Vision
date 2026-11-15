@@ -101,6 +101,13 @@ const pairs: [fg: string, bg: string][] = [
   ["--accent-text", "--color-hover"],
   ["--accent-text", "--accent-soft"],
   ["--color-text", "--accent-soft"],
+  // Beton: inverted ink (primary buttons, current nav row, success tags, command lines).
+  ["--color-text-inverse", "--color-text"],
+  // Beton: text on the signal colour (warning tags, primary button hover) and on danger tags.
+  ["--color-signal-fg", "--color-signal"],
+  ["--color-danger-fg", "--color-danger"],
+  // Beton: signal-coloured marks drawn on inverted ink (current nav number, switch knob).
+  ["--color-signal-on-ink", "--color-text"],
 ];
 
 describe("design token contrast (WCAG 2.2 AA, 4.5:1)", () => {

@@ -35,43 +35,46 @@
   flex-direction: column;
   min-height: 0;
   background: var(--color-bg-sidebar);
-  border-right: 1px solid var(--color-border);
+  border-right: var(--line) solid var(--color-border);
   overflow: hidden;
 }
 
+/* The sidebar is a stack of ruled bands: brand, profile, search, numbered navigation. */
 .sidebar-top {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-3) var(--space-2);
 }
 
 .sidebar-brand {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  height: 36px;
-  padding: 0 var(--space-1);
+  height: var(--header-height);
+  padding: 0 var(--space-2) 0 var(--space-4);
+  border-bottom: var(--line) solid var(--color-border);
 }
 
 .sidebar-wordmark {
   flex: 1;
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
+  font-family: var(--font-display);
+  font-stretch: 125%;
+  font-size: var(--font-size-xl);
+  font-weight: 900;
   letter-spacing: -0.01em;
+  text-transform: uppercase;
 }
 
 .sidebar.is-collapsed .sidebar-brand {
   flex-direction: column;
   height: auto;
   gap: var(--space-2);
-  padding: 0;
+  padding: var(--space-3) 0;
 }
 
 .sidebar-actions {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  border-bottom: var(--line) solid var(--color-border);
 }
 
 .sidebar-new-task,
@@ -81,8 +84,8 @@
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  height: 34px;
-  padding: 0 var(--space-2);
+  height: 38px;
+  padding: 0 var(--space-4);
   border-radius: var(--radius-md);
   color: var(--color-text);
   font-size: var(--font-size-md);
@@ -117,35 +120,58 @@
   flex: none;
 }
 
-/* Current page: accent-soft fill plus an accent bar, unlike the neutral hover. */
-.nav-item.is-current {
-  position: relative;
-  background: var(--accent-soft);
-  color: var(--accent-text);
-  font-weight: var(--font-weight-semibold);
-}
-
-.nav-item.is-current::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 6px;
-  bottom: 6px;
-  width: 3px;
-  border-radius: var(--radius-full);
-  background: var(--focus-ring);
-}
-
-.nav-item.is-current svg {
-  color: var(--accent-text);
-}
-
+/* Navigation reads as a numbered index; labels are set in capitals. */
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--color-border);
+  counter-reset: nav;
+}
+
+.sidebar-nav > li {
+  counter-increment: nav;
+  border-bottom: var(--line-thin) solid var(--color-rule);
+}
+
+.sidebar:not(.is-collapsed) .nav-item {
+  gap: var(--space-3);
+  letter-spacing: var(--letter-spacing-caps);
+  text-transform: uppercase;
+}
+
+.sidebar:not(.is-collapsed) .nav-item svg {
+  display: none;
+}
+
+.sidebar:not(.is-collapsed) .nav-item::before {
+  content: counter(nav, decimal-leading-zero);
+  width: 2ch;
+  color: var(--color-text-muted);
+  flex: none;
+}
+
+/* Current page: the row inverts to ink. Unlike hover, which only tints. */
+.nav-item.is-current,
+.nav-item.is-current:hover {
+  background: var(--color-text);
+  color: var(--color-text-inverse);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* Full-bleed rows sit in an overflow-hidden sidebar: draw their focus ring inside. */
+.nav-item:focus-visible,
+.sidebar-search:focus-visible,
+.sidebar-new-task:focus-visible,
+.sidebar .profile-button:focus-visible {
+  outline-offset: -4px;
+}
+
+.nav-item.is-current:focus-visible {
+  outline-color: var(--color-text-inverse);
+}
+
+.sidebar:not(.is-collapsed) .nav-item.is-current::before,
+.nav-item.is-current svg {
+  color: var(--color-signal-on-ink);
 }
 
 .sidebar.is-collapsed .sidebar-new-task,
@@ -159,7 +185,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-2) var(--space-3) var(--space-4);
+  padding: var(--space-3) var(--space-3) var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
@@ -176,7 +202,8 @@
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
   color: var(--color-text-muted);
-  letter-spacing: 0.02em;
+  letter-spacing: var(--letter-spacing-caps);
+  text-transform: uppercase;
 }
 
 .sidebar-heading-row {
@@ -202,7 +229,7 @@
 .sidebar-footer {
   margin-top: auto;
   padding: var(--space-2) var(--space-4);
-  border-top: 1px solid var(--color-border);
+  border-top: var(--line) solid var(--color-border);
 }
 
 .sidebar-footer.is-collapsed {
@@ -265,6 +292,8 @@
   align-items: center;
   gap: var(--space-2);
   font-size: var(--font-size-xs);
+  letter-spacing: var(--letter-spacing-caps);
+  text-transform: uppercase;
   color: var(--color-text-muted);
   min-height: 24px;
 }
@@ -296,8 +325,8 @@
   justify-content: space-between;
   gap: var(--space-4);
   min-height: var(--header-height);
-  padding: var(--space-2) var(--space-6);
-  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-3) var(--space-6);
+  border-bottom: var(--line) solid var(--color-border);
   flex: none;
 }
 
@@ -309,8 +338,13 @@
 }
 
 .view-title {
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-semibold);
+  font-family: var(--font-display);
+  font-stretch: 125%;
+  font-size: var(--font-size-2xl);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -438,10 +472,22 @@
   gap: var(--space-3);
 }
 
+/* Section headings: small capitals followed by a rule to the edge of the column. */
 .section-heading {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text);
+}
+
+.section-heading::after {
+  content: "";
+  flex: 1;
+  border-top: var(--line) solid var(--color-border);
 }
 
 .home-recent-grid {
@@ -463,7 +509,7 @@
   min-height: 92px;
   padding: var(--space-4);
   background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  border: var(--line) solid var(--color-border);
   border-radius: var(--radius-lg);
   text-align: left;
   transition:
@@ -540,8 +586,10 @@ button.run-card:hover {
 }
 
 .settings-label {
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   margin-bottom: var(--space-2);
   padding: 0;
 }
@@ -554,7 +602,7 @@ button.run-card:hover {
 .settings-list {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--color-border);
+  border: var(--line) solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-surface);
 }
@@ -566,7 +614,7 @@ button.run-card:hover {
 }
 
 .settings-list > div + div {
-  border-top: 1px solid var(--color-border);
+  border-top: var(--line-thin) solid var(--color-rule);
 }
 
 .settings-list dt {
