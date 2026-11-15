@@ -18,7 +18,8 @@
 :root {
   color-scheme: light;
 
-  /* Colours: surfaces, lines, text, status, signal, diff */
+  /* Colours: surfaces, lines, text, status, signal, diff. --color-rule is for decorative
+     row separators only, never for a control border (it is below 3:1). */
   --color-bg: #d6d3cc;
   --color-bg-sidebar: #d6d3cc;
   --color-surface: #e9e7e2;

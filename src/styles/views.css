@@ -356,45 +356,47 @@
   background: var(--color-surface);
 }
 
-/*
- * Wide rows: name and switch on top, the command as a full-bleed terminal line, then
- * details on the left and actions on the right. The wrappers dissolve into the row grid;
- * DOM order (and so reading and focus order) is unchanged.
- */
-.server-row:not(.is-loading) {
-  gap: var(--space-2) var(--space-4);
-}
+@media (min-width: 901px) {
+  /*
+   * Wide rows: name and switch on top, the command as a full-bleed terminal line, then
+   * details on the left and actions on the right. The wrappers dissolve into the row grid;
+   * DOM order (and so reading and focus order) is unchanged.
+   */
+  .server-row:not(.is-loading) {
+    gap: var(--space-2) var(--space-4);
+  }
 
-.server-row:not(.is-loading) > .server-main,
-.server-row:not(.is-loading) > .server-side {
-  display: contents;
-}
+  .server-row:not(.is-loading) > .server-main,
+  .server-row:not(.is-loading) > .server-side {
+    display: contents;
+  }
 
-.server-row:not(.is-loading) .server-heading {
-  grid-column: 1;
-  grid-row: 1;
-}
+  .server-row:not(.is-loading) .server-heading {
+    grid-column: 1;
+    grid-row: 1;
+  }
 
-.server-row:not(.is-loading) .server-side > .switch {
-  grid-column: 2;
-  grid-row: 1;
-  justify-self: end;
-}
+  .server-row:not(.is-loading) .server-side > .switch {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+  }
 
-.server-row:not(.is-loading) .server-target {
-  grid-column: 1 / -1;
-  grid-row: 2;
-  margin-block: var(--space-1);
-}
+  .server-row:not(.is-loading) .server-target {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    margin-block: var(--space-1);
+  }
 
-.server-row:not(.is-loading) .server-main > :not(.server-heading, .server-target) {
-  grid-column: 1;
-}
+  .server-row:not(.is-loading) .server-main > :not(.server-heading, .server-target) {
+    grid-column: 1;
+  }
 
-.server-row:not(.is-loading) .server-actions {
-  grid-column: 2;
-  grid-row: 3;
-  align-self: start;
+  .server-row:not(.is-loading) .server-actions {
+    grid-column: 2;
+    grid-row: 3;
+    align-self: start;
+  }
 }
 
 .server-row.is-loading {
@@ -403,19 +405,27 @@
   min-height: 88px;
 }
 
+/* A disabled server keeps its shape: dashed frame, dimmed name and command line. */
+.server-row.is-disabled {
+  border-style: dashed;
+}
+
 .server-row.is-disabled .server-name {
   color: var(--color-text-muted);
 }
 
 .server-row.is-disabled .server-target {
-  background: var(--color-surface-sunken);
-  color: var(--color-text-muted);
+  opacity: 0.6;
 }
 
 .server-main {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  min-width: 0;
+}
+
+.server-main > * {
   min-width: 0;
 }
 
@@ -463,6 +473,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.server-target.is-wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .server-target::before {
@@ -999,7 +1014,9 @@
 }
 
 .callout.is-warning {
-  background: var(--color-warning-bg);
+  background: transparent;
+  border: var(--line) solid var(--color-border);
+  border-left: 8px solid var(--color-signal);
   color: var(--color-text);
 }
 
@@ -1281,6 +1298,7 @@
 }
 
 .overview-figure {
+  overflow-wrap: anywhere;
   font-family: var(--font-display);
   font-stretch: 125%;
   font-size: var(--font-size-display);
@@ -1420,17 +1438,6 @@
 @media (max-width: 900px) {
   .server-row {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .server-row:not(.is-loading) > .server-main,
-  .server-row:not(.is-loading) > .server-side {
-    display: flex;
-  }
-
-  .server-row:not(.is-loading) .server-main > *,
-  .server-row:not(.is-loading) .server-side > * {
-    grid-column: auto;
-    grid-row: auto;
   }
 
   .server-side {

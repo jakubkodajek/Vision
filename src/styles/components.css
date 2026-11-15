@@ -619,7 +619,7 @@
 }
 
 .tree-row.is-selected .tree-icon {
-  color: var(--accent-text);
+  color: var(--color-text);
 }
 
 .tree-label {
@@ -891,8 +891,8 @@
   height: 32px;
   flex: none;
   border-radius: var(--radius-sm);
-  background: var(--color-warning-bg);
-  color: var(--color-warning);
+  background: var(--color-signal);
+  color: var(--color-signal-fg);
 }
 
 .approval-allowed .approval-icon {
@@ -1085,8 +1085,8 @@
 }
 
 .composer-send:hover:not(:disabled) {
-  background: var(--accent-hover);
-  color: var(--accent-fg);
+  background: var(--color-signal);
+  color: var(--color-signal-fg);
 }
 
 .composer-send:disabled {
@@ -1353,7 +1353,7 @@
 .palette-search::before {
   content: ">";
   content: ">" / "";
-  color: var(--color-signal);
+  color: var(--color-text);
   font-weight: var(--font-weight-semibold);
 }
 

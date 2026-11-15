@@ -157,6 +157,18 @@
   font-weight: var(--font-weight-semibold);
 }
 
+/* Full-bleed rows sit in an overflow-hidden sidebar: draw their focus ring inside. */
+.nav-item:focus-visible,
+.sidebar-search:focus-visible,
+.sidebar-new-task:focus-visible,
+.sidebar .profile-button:focus-visible {
+  outline-offset: -4px;
+}
+
+.nav-item.is-current:focus-visible {
+  outline-color: var(--color-text-inverse);
+}
+
 .sidebar:not(.is-collapsed) .nav-item.is-current::before,
 .nav-item.is-current svg {
   color: var(--color-signal-on-ink);
