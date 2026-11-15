@@ -906,7 +906,7 @@ depend on Q1.
 | # | Risk | Mitigation |
 | --- | --- | --- |
 | R1 | **Scope** is large for one developer | Order above; 4 built-in agents; inbox, usage panel, Antigravity after 0.1; time boxes (Q1) |
-| R2 | **Provider terms** are read in Vision's favour but not confirmed (§1, §3.1, §6.7) | Never handle tokens; do not bundle or modify CLIs; keep all sign-in methods possible; terms checklist per release; written question to Anthropic and OpenAI before M2 (Q2); never offer a hosted or paid Vision |
+| R2 | **Provider terms** are read in Vision's favour but not confirmed (§1, §3.1, §6.7) | Never handle tokens; do not bundle or modify CLIs; keep all sign-in methods possible; terms checklist per release; no written confirmation, owner accepts R2 (D12); never offer a hosted or paid Vision |
 | R3 | **Subscription usage limits** with parallel agents | Per-account concurrency, daily caps, rate-limit pause, Pause all |
 | R4 | **CLI churn** breaks adapters | Capability detection, unknown-event tolerance, replay and live tiers, compatibility manifest |
 | R5 | **Repository content executes code** in non-bare runs | Repo config off by default, hash-pinned opt-in (§3.5) |
