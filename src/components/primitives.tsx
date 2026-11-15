@@ -187,7 +187,7 @@ export function RunStatusBadge({ status, compact = false }: { status: RunStatus;
   );
 }
 
-/** Vision logo mark: an aperture of two arcs around a pupil. Original artwork. */
+/** Vision mark: a signal-orange V cut into an ink square. Placeholder until a logo is chosen. */
 export function LogoMark({ size = 24 }: { size?: number }) {
   return (
     <svg
@@ -198,10 +198,8 @@ export function LogoMark({ size = 24 }: { size?: number }) {
       aria-hidden="true"
       focusable="false"
     >
-      <rect width="32" height="32" rx="9" className="logo-mark-bg" />
-      <path d="M6 16c2.8-4.9 6.1-7.3 10-7.3s7.2 2.4 10 7.3" className="logo-mark-arc" />
-      <path d="M6 16c2.8 4.9 6.1 7.3 10 7.3s7.2-2.4 10-7.3" className="logo-mark-arc" />
-      <circle cx="16" cy="16" r="3.6" className="logo-mark-pupil" />
+      <rect width="32" height="32" className="logo-mark-bg" />
+      <polygon points="6,7 12,7 16,19 20,7 26,7 19.5,25 12.5,25" className="logo-mark-v" />
     </svg>
   );
 }

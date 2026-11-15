@@ -19,7 +19,6 @@ body {
   font-family: var(--font-sans);
   font-size: var(--font-size-md);
   line-height: var(--line-height-normal);
-  font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -71,8 +70,8 @@ kbd {
 }
 
 ::selection {
-  background: var(--accent-soft);
-  color: var(--color-text);
+  background: var(--color-text);
+  color: var(--color-text-inverse);
 }
 
 /* One visible focus style everywhere (WCAG 2.4.7 / 2.4.13). */
@@ -83,7 +82,6 @@ kbd {
 :focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: 2px;
-  border-radius: var(--radius-sm);
 }
 
 .visually-hidden {

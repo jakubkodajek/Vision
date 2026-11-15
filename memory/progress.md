@@ -81,3 +81,9 @@ Template:
 - State: `make check` exit 0 locally (417 Rust tests, 921 vitest tests); all PR #4 jobs green on 96c81a5 (macOS arm64 and x86_64, Windows, Linux, advisories).
 - Not verified live: the app inside a real Tauri window on macOS or Windows (terminal launch, keychain, confirmation dialog). `passes` in `memory/features.json` is unchanged until that is done.
 - Next: owner installs the `.dmg` from the PR #4 workflow artifacts and tries sign-in per profile; then a second independent review of the UI fix round; then F-006/F-020 (agent runs).
+
+## 2026-11-15 - Beton redesign (brutalist / functionalist UI)
+- Done: owner called the UI "AI slop" and picked direction A "Beton" from mockups (/mnt/project-files/vision-redesign/). Token-first rewrite of `src/styles/tokens.css` (radius 0, no shadows, ink lines, concrete/ink palettes, international-orange signal, ink focus ring), then targeted changes in layout/components/views CSS: numbered uppercase navigation, display-type titles (Archivo), inverted status tags, raw `$ command` lines on MCP rows, hatched overlays, icons hidden where they only decorate. Spec: `docs/specs/design-beton.md`.
+- Tests: contrast test extended with the new pairs (inverse on ink, signal-fg on signal, danger-fg on danger, signal-on-ink on ink).
+- Evidence: see the PR (make check output, screenshots retaken in `docs/screenshots/real-app/`).
+- Not done: Tools as a table (mockup) — kept cards to avoid markup and test churn; candidate follow-up.
