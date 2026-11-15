@@ -75,3 +75,9 @@ Template:
 - Done: core A1-A7 (IpcError field/entry_key, ToolSpecView.approved, McpServerView synced/has_secrets, `mcp_set_enabled`, `app_open_releases_page`, more config vars, health kept on unchanged destination), UI CR-1..CR-16 and UX-1..UX-38 (approval-aware checks, per-key sequence guards, accessible dialog stack, field-level errors, live region per scope, 3:1 control borders and focus ring, copy).
 - Evidence: vitest and Rust suites in `make check` (`.work/real-app/check-uifix.log`); axe with color-contrast 0 violations in 12 states x light/dark x 1280x820/880x560; focus/live-region script 23 PASS (`.work/real-app/uxfix/`); screenshots retaken in `docs/screenshots/real-app/`.
 - Partial/deferred: UX-11 (values wrap, no Copy button); NewProfileDialog has no unsaved-changes prompt; stored-secret screenshot shows the secret row below the fold.
+
+## 2026-11-15 - real-app CI on all platforms
+- Done: first native `cargo test` runs on Windows and macOS. Fixed a Windows hang in `GroupChild::kill_group` (Job Object wait after a drained completion port) and CRLF checkout of byte-compared files (`.gitattributes`). PR #4 body filled in with evidence.
+- State: `make check` exit 0 locally (417 Rust tests, 921 vitest tests); all PR #4 jobs green on 96c81a5 (macOS arm64 and x86_64, Windows, Linux, advisories).
+- Not verified live: the app inside a real Tauri window on macOS or Windows (terminal launch, keychain, confirmation dialog). `passes` in `memory/features.json` is unchanged until that is done.
+- Next: owner installs the `.dmg` from the PR #4 workflow artifacts and tries sign-in per profile; then a second independent review of the UI fix round; then F-006/F-020 (agent runs).
