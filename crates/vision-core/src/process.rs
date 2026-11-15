@@ -201,8 +201,13 @@ impl GroupChild {
         }
         #[cfg(windows)]
         {
+            // Terminates every process in the Job Object.
             let _ = self.child.start_kill();
-            let _ = self.child.wait();
+            // Reap only the leader, through the wrapped child. The Job Object wrapper's own
+            // `wait` blocks without a timeout on the job's completion port, and `try_wait`
+            // (polled in `wait_until`) has usually consumed the port's messages by now, so
+            // that `wait` never returns once the job is already empty.
+            let _ = self.child.inner_mut().wait();
         }
     }
 }
