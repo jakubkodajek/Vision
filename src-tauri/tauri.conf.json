@@ -11,7 +11,7 @@
   },
   "app": {
     "withGlobalTauri": false,
-    "windows": [{ "label": "main", "title": "Vision", "width": 1200, "height": 800 }],
+    "windows": [{ "label": "main", "title": "Vision", "width": 1280, "height": 820, "minWidth": 880, "minHeight": 560 }],
     "security": {
       "freezePrototype": true,
       "csp": {

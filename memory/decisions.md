@@ -16,3 +16,5 @@ Format: `- YYYY-MM-DD: <decision> - <reason> [ADR-NNNN]`
 - 2026-11-13: SQLite per profile plus a small app database; no server database - local-only data, profile isolation (docs/adr/0003-sqlite-per-profile.md)
 - 2026-11-13: Sign in through the official CLIs on the user's subscription; Vision stores no AI or GitHub tokens (docs/adr/0004-official-clis-subscription-sign-in.md)
 - 2026-11-14: Bundle identifier io.github.jakubkodajek.vision (default; changeable until F-003 creates app data under it) - owner did not pick one
+
+- 2026-11-14 (F-005): UI dependencies lucide-react (ISC), @fontsource-variable/inter and jetbrains-mono (OFL, bundled so `font-src 'self'` holds), axe-core (MPL-2.0, dev only). Profile accents are fixed palettes selected by `data-accent` rather than arbitrary colours, so contrast is testable and no inline styles are needed. The project tree renders as a flat ARIA tree (aria-level/setsize/posinset) so accessible names equal visible text.
